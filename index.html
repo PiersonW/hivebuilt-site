@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hivebuilt</title>
+<meta name="description" content="Hivebuilt LLC builds simple apps for planning, gathering, and getting outside. Makers of Ping and RVnB." />
+<link rel="icon" href="ping-icon.png" />
+<style>
+  :root {
+    --bg: #FBF8F3;
+    --ink: #24211D;
+    --muted: #6B655C;
+    --line: #E6DED1;
+    --card: #FFFFFF;
+    --accent: #C98A1B;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1A1815; --ink: #F2EEE7; --muted: #A8A196; --line: #34302A; --card: #23201C; --accent: #E2A93A; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 72px 20px 56px; }
+  .mark { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: 0.02em; }
+  .mark svg { width: 28px; height: 28px; color: var(--accent); }
+  h1 { font-size: clamp(32px, 6vw, 46px); line-height: 1.15; margin: 28px 0 14px; letter-spacing: -0.01em; }
+  .lede { font-size: 19px; color: var(--muted); max-width: 560px; margin: 0 0 48px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 16px; }
+  .apps { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 56px; }
+  .app {
+    display: flex; gap: 16px; align-items: flex-start;
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 20px;
+    text-decoration: none; color: inherit;
+  }
+  .app:hover { border-color: var(--accent); }
+  .app img { width: 56px; height: 56px; border-radius: 13px; flex: none; }
+  .app strong { font-size: 18px; display: block; }
+  .app span { color: var(--muted); font-size: 15px; }
+  .contact { border-top: 1px solid var(--line); padding-top: 28px; color: var(--muted); font-size: 15px; }
+  .contact a { color: var(--ink); }
+  footer { max-width: 760px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="mark">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+      <path d="M12 2.8 19.8 7.3v9.4L12 21.2 4.2 16.7V7.3z" />
+      <path d="M12 8.2 15.3 10.1v3.8L12 15.8 8.7 13.9v-3.8z" />
+    </svg>
+    Hivebuilt
+  </div>
+
+  <h1>Simple apps for getting people together.</h1>
+  <p class="lede">
+    Hivebuilt is a small software studio in Alpine, Utah. We make apps that
+    take the work out of planning, inviting, and getting outside.
+  </p>
+
+  <h2>Our apps</h2>
+  <div class="apps">
+    <a class="app" href="https://apps.apple.com/app/id6799301780">
+      <img src="ping-icon.png" alt="" />
+      <div>
+        <strong>Ping</strong>
+        <span>Plan events with the people who matter: invites, RSVPs, what to bring, and a shared calendar.</span>
+      </div>
+    </a>
+    <a class="app" href="https://tryrvnb.com">
+      <img src="rvnb-icon.png" alt="" />
+      <div>
+        <strong>RVnB</strong>
+        <span>Book a spot to park your RV on private land, or list your own lot and earn from it.</span>
+      </div>
+    </a>
+  </div>
+
+  <div class="contact">
+    Hivebuilt LLC · Alpine, Utah<br />
+    Contact: <a href="mailto:pierson.willhite@gmail.com">pierson.willhite@gmail.com</a>
+  </div>
+</main>
+<footer>© 2026 Hivebuilt LLC</footer>
+</body>
+</html>
