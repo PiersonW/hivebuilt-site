@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sow & Grow: Garden Planner</title>
+<meta name="description" content="Sow & Grow plans your garden around your own frost dates: when to start seeds, plant, water, feed and harvest." />
+<link rel="icon" href="/sow-and-grow/icon.png" />
+<style>
+  :root { --bg: #F6F4EA; --ink: #1F2A1E; --muted: #5A6657; --line: #DDDCC8; --card: #FFFFFF; --accent: #22663A; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151A14; --ink: #EEF2EA; --muted: #A4AE9F; --line: #2E362C; --card: #1D231C; --accent: #7FC891; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; }
+  main { max-width: 720px; margin: 0 auto; padding: 56px 20px 48px; }
+  .top { display: flex; align-items: center; gap: 14px; }
+  .top img { width: 64px; height: 64px; border-radius: 15px; }
+  h1 { font-size: clamp(28px, 6vw, 40px); line-height: 1.15; margin: 0; }
+  .sub { color: var(--muted); margin: 2px 0 0; }
+  h2 { font-size: 20px; margin: 36px 0 8px; }
+  a { color: var(--accent); }
+  ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin: 20px 0; }
+  footer { max-width: 720px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+<div class="top"><img src="/sow-and-grow/icon.png" alt="" /><div><h1>Sow &amp; Grow</h1><p class="sub">Garden planner</p></div></div>
+
+<p>Sow &amp; Grow plans your vegetable and flower garden around where you live. It works out your hardiness zone and frost dates, builds a planting schedule for everything you choose to grow, tells you when to water, and turns a walk around the garden into a to-do list.</p>
+
+<div class="card"><strong>Help and questions:</strong> email <a href="mailto:hello@hivebuilt.dev?subject=Sow%20%26%20Grow">hello@hivebuilt.dev</a>. Please say which phone you use and what you were doing when something went wrong.</div>
+
+<h2>Common questions</h2>
+<p><strong>My frost dates look wrong.</strong> They are estimated from 30 years of weather records for your garden's location, and the elevation used is shown next to your zone. If the elevation looks wrong, set the location again by typing your town or postal code. If you know your own dates, open the garden, choose <em>Edit garden, frost dates and zone</em>, and set them; every schedule follows.</p>
+<p><strong>How does the app decide when to plant?</strong> Cold-hardy crops count from your average last spring frost. Tender crops count from the later date when only a 10% chance of frost remains. You can change any date, and ticking a job done moves the rest of that planting's schedule to match.</p>
+<p><strong>How does the watering advice work?</strong> It keeps a daily water budget for the root zone using local evaporation, rain, your crops' stage and your soil, and asks for water when plants have used the share they can spare. Tap <em>I watered</em> so it knows.</p>
+<p><strong>The seed packet reader could not read my packet.</strong> Photograph the back of the packet, flat and in good light. If it still cannot read it, choose the crop from the list or use <em>Add my own variety</em>.</p>
+<p><strong>I am not getting reminders.</strong> Check that notifications are allowed for Sow &amp; Grow in your phone's Settings, and that Reminders are on under <em>More</em> in the app.</p>
+<p><strong>Is my garden backed up?</strong> Not yet. Everything you enter is kept on your phone, so deleting the app deletes your gardens.</p>
+</main>
+<footer><a href="/sow-and-grow/">Sow &amp; Grow</a> · <a href="/sow-and-grow/privacy.html">Privacy</a> · <a href="/">Hivebuilt</a></footer>
+</body>
+</html>
