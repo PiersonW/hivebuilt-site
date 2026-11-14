@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Yard Walk</title>
+<meta name="description" content="Yard Walk: a beehive tracker for beekeepers. Help and questions." />
+<link rel="icon" href="/yard-walk/icon.png" />
+<style>
+  :root { --bg: #FBF6EA; --ink: #2B2118; --muted: #6B5D4D; --line: #E6DCC6; --card: #FFFFFF; --accent: #9A6200; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151A14; --ink: #EEF2EA; --muted: #A4AE9F; --line: #2E362C; --card: #1D231C; --accent: #F2B134; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; }
+  main { max-width: 720px; margin: 0 auto; padding: 56px 20px 48px; }
+  .top { display: flex; align-items: center; gap: 14px; }
+  .top img { width: 64px; height: 64px; border-radius: 15px; }
+  h1 { font-size: clamp(28px, 6vw, 40px); line-height: 1.15; margin: 0; }
+  .sub { color: var(--muted); margin: 2px 0 0; }
+  h2 { font-size: 20px; margin: 36px 0 8px; }
+  a { color: var(--accent); }
+  ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin: 20px 0; }
+  footer { max-width: 720px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+<div class="top"><img src="/yard-walk/icon.png" alt="" /><div><h1>Yard Walk</h1><p class="sub">Beehive tracker</p></div></div>
+
+<p>Yard Walk is a hive tracker for beekeepers. Walk your bee yard hive by hive, tap what you see, and the app keeps track of what each hive needs next, even where there is no signal.</p>
+
+<div class="card"><strong>Help and questions:</strong> email <a href="mailto:hello@hivebuilt.dev?subject=Yard%20Walk">hello@hivebuilt.dev</a>. Please say which phone you use and what you were doing when something went wrong.</div>
+
+<h2>Common questions</h2>
+<p><strong>Does it work without signal?</strong> Yes. Everything is saved on your phone first. Weather and backup catch up the next time you are online.</p>
+<p><strong>How do the notes create to-dos?</strong> Some notes act on the hive. <em>Needs mite treatment</em> flags the hive and adds a to-do; <em>Treated for mites</em> clears it and reminds you to recount; <em>Grafted queen cells</em> reminds you to move the cells. Change what any note does, or add your own, under <em>More</em>, <em>Manage notes</em>.</p>
+<p><strong>Where does the honey-safe countdown come from?</strong> From the number of days you enter from your treatment's label. Yard Walk does not supply withdrawal times; always follow the label.</p>
+<p><strong>How do I add nucs or split a hive?</strong> On a yard, tap <em>Add hives or nucs</em>, choose how many and which hive they came from. The parent hive's history shows the split.</p>
+<p><strong>Is my data backed up?</strong> Only if you turn on backup under <em>More</em>, <em>Backup</em>. Then sign in on a new phone to get everything back. You can also export every inspection as a spreadsheet or PDF.</p>
+<p><strong>How do I delete my account?</strong> <em>More</em>, <em>Backup</em>, <em>Delete account</em>. See the <a href="/yard-walk/privacy.html">privacy policy</a> for what that removes.</p>
+</main>
+<footer><a href="/yard-walk/">Yard Walk</a> · <a href="/yard-walk/privacy.html">Privacy</a> · <a href="/">Hivebuilt</a></footer>
+</body>
+</html>
