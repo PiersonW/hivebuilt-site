@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>He Said, She Said</title>
+<meta name="description" content="He Said, She Said: the party game where you guess whether your friends are telling the truth. How to play, and help." />
+<link rel="icon" href="/he-said-she-said/icon.png" />
+<style>
+  :root { --bg: #FBF8F3; --ink: #17122B; --muted: #625C73; --line: #E6E0EF; --card: #FFFFFF; --accent: #D9483B; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #17122B; --ink: #F7F1E6; --muted: #A8A1BC; --line: #342C52; --card: #221B3D; --accent: #FF6B5E; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; }
+  main { max-width: 720px; margin: 0 auto; padding: 56px 20px 48px; }
+  .top { display: flex; align-items: center; gap: 14px; }
+  .top img { width: 64px; height: 64px; border-radius: 15px; }
+  h1 { font-size: clamp(28px, 6vw, 40px); line-height: 1.15; margin: 0; }
+  .sub { color: var(--muted); margin: 2px 0 0; }
+  h2 { font-size: 20px; margin: 36px 0 8px; }
+  a { color: var(--accent); }
+  ol, ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin: 20px 0; }
+  footer { max-width: 720px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+<div class="top"><img src="/he-said-she-said/icon.png" alt="" /><div><h1>He Said, She Said</h1><p class="sub">Did they really say that?</p></div></div>
+
+<p>One friend answers a question in secret. Another friend passes the answer on, word for word or with a sneaky change. Everyone else has to guess: is that what was really said?</p>
+
+<div class="card"><strong>Help and questions:</strong> email <a href="mailto:hello@hivebuilt.dev?subject=He%20Said%2C%20She%20Said">hello@hivebuilt.dev</a>. Please say which phone you use and what happened.</div>
+
+<h2>How to play</h2>
+<ol>
+<li>One person taps <em>Start a Game</em> and picks the winning score: 10, 15, 20 or 30.</li>
+<li>Everyone else enters the 4-letter room code to join. You need at least 4 players. No accounts needed.</li>
+<li>Each turn, one player gets a question and types an honest answer that only the messenger sees.</li>
+<li>The messenger passes it on as is, picks a fake answer, or writes their own. They tap <em>Done</em> when they've decided.</li>
+<li>Everyone else votes: did they really say that, or was it changed?</li>
+<li>Guess right and you and the answerer each get a point. Guess wrong and the messenger gets a point.</li>
+<li>The first player to reach the winning score wins.</li>
+</ol>
+
+<h2>Common questions</h2>
+<p><strong>Can I try it alone?</strong> Yes. In the lobby, tap <em>Fill with computer players</em>. They answer, pass answers on and vote on their own.</p>
+<p><strong>What if someone stops playing?</strong> Every step has a timer, so nobody can stall. If the answerer doesn't answer in time, the game picks an answer for them, and they don't earn points for it.</p>
+<p><strong>What if two players are tied at the winning score?</strong> The game keeps going until one of them is ahead.</p>
+<p><strong>Are the questions family-friendly?</strong> Yes. They're everyday questions like "What would you name a pet goat?" and "What is your go-to karaoke song?"</p>
+</main>
+<footer><a href="/he-said-she-said/">He Said, She Said</a> · <a href="/he-said-she-said/privacy.html">Privacy</a> · <a href="/">Hivebuilt</a></footer>
+</body>
+</html>
