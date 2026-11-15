@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sprinkle Sprint</title>
+<meta name="description" content="Sprinkle Sprint: the candy-matching race game. How to play, and help." />
+<link rel="icon" href="/sprinkle-sprint/icon.png" />
+<style>
+  :root { --bg: #FFE3F1; --ink: #4A1238; --muted: #8A5A78; --line: #F6C4DE; --card: #FFFFFF; --accent: #E6337F; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1E0E19; --ink: #FBE6F2; --muted: #C59BB6; --line: #4A2A3E; --card: #2A1524; --accent: #FF6FAE; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; }
+  main { max-width: 720px; margin: 0 auto; padding: 56px 20px 48px; }
+  .top { display: flex; align-items: center; gap: 14px; }
+  .top img { width: 64px; height: 64px; border-radius: 15px; }
+  h1 { font-size: clamp(28px, 6vw, 40px); line-height: 1.15; margin: 0; }
+  .sub { color: var(--muted); margin: 2px 0 0; }
+  h2 { font-size: 20px; margin: 36px 0 8px; }
+  a { color: var(--accent); }
+  ol, ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin: 20px 0; }
+  footer { max-width: 720px; margin: 0 auto; padding: 0 20px 40px; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+<div class="top"><img src="/sprinkle-sprint/icon.png" alt="" /><div><h1>Sprinkle Sprint</h1><p class="sub">The candy-matching race game</p></div></div>
+
+<p>Match candies to make your kart go. Every candy you clear moves you closer to the finish line. Race the computer on your own, or race your family from their own phones.</p>
+
+<div class="card"><strong>Help and questions:</strong> email <a href="mailto:hello@hivebuilt.dev?subject=Sprinkle%20Sprint">hello@hivebuilt.dev</a>. Please say which phone or tablet you use and what happened.</div>
+
+<h2>How to play</h2>
+<ol>
+<li>Type your name and pick your racer: Berry, Minty, Lemon, Plum, Sky or Peach.</li>
+<li>Swipe a candy toward its neighbor, or tap one candy and then the other, to line up 3 or more of the same kind.</li>
+<li>Cleared candies move your kart. Chains, where new matches fall into place on their own, count extra.</li>
+<li>The first racer to reach the finish line wins.</li>
+</ol>
+
+<h2>Special candies</h2>
+<ul>
+<li><strong>Match 4 in a row</strong> to make a striped candy. Match it again to clear a whole row or column.</li>
+<li><strong>Match in an L or T shape</strong> to make a candy bomb, which clears the candies around it.</li>
+<li><strong>Match 5 in a row</strong> to make a sprinkle ball. Swap it with any candy to clear every candy of that color.</li>
+</ul>
+
+<h2>Racing your family</h2>
+<ol>
+<li>One person taps <em>Start a Race</em> and gets a 4-letter race code.</li>
+<li>Everyone else types the code and taps <em>Join</em>. Up to 6 racers can play.</li>
+<li>The host picks Short, Medium or Long and taps <em>Start the Race</em>.</li>
+</ol>
+<p>Everyone starts on the same candy board. Racers who fall far behind get a catch-up boost, so the race stays close.</p>
+
+<h2>Common questions</h2>
+<p><strong>Can I play alone?</strong> Yes. Tap <em>Practice Race</em> to race three computer racers. Practice works without the internet.</p>
+<p><strong>Do we need accounts?</strong> No. There's no sign-up, email or password.</p>
+<p><strong>What if I'm stuck with no moves?</strong> The board shuffles itself, and after a few seconds a possible move wiggles to give you a hint.</p>
+<p><strong>When does a race end?</strong> When everyone has finished, or 45 seconds after the first racer finishes.</p>
+</main>
+<footer><a href="/sprinkle-sprint/">Sprinkle Sprint</a> · <a href="/sprinkle-sprint/privacy.html">Privacy</a> · <a href="/">Hivebuilt</a></footer>
+</body>
+</html>
