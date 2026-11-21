@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Porch Stand</title>
+<meta name="description" content="See what this porch stand has out right now, and follow it in the free Porch Stand app." />
+<meta property="og:title" content="A neighbor's stand is on Porch Stand" />
+<meta property="og:description" content="See what's out right now, and get a heads-up when they set out." />
+<meta property="og:image" content="https://hivebuilt.dev/porch-stand/icon.png" />
+<meta name="apple-itunes-app" content="app-id=6835310225" />
+<link rel="icon" href="/porch-stand/icon.png" />
+<style>
+  :root { --bg: #FBF0E1; --ink: #1F2A22; --muted: #6B6F63; --line: #E6DFD0; --card: #FFFFFF; --accent: #2F7D4F; --green-soft: #E4F1E8; --gray-soft: #EFECE4; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #121812; --ink: #EAF0E6; --muted: #A1AE9B; --line: #263026; --card: #1A221A; --accent: #7CC796; --green-soft: #1E3324; --gray-soft: #222822; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.5; }
+  main { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--muted); font-weight: 700; font-size: 14px; text-decoration: none; }
+  .brand img { width: 32px; height: 32px; border-radius: 8px; }
+  .hero { margin: 18px 0 14px; border-radius: 20px; overflow: hidden; background: var(--card); border: 1px solid var(--line); }
+  .band { padding: 22px 20px 18px; color: #fff; }
+  .band h1 { margin: 0; font-size: clamp(28px, 8vw, 38px); line-height: 1.1; }
+  .band p { margin: 6px 0 0; opacity: .92; font-weight: 600; }
+  .cover { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; }
+  .inner { padding: 16px 20px 20px; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; font-weight: 800; }
+  .pill .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .out { background: var(--green-soft); color: var(--accent); } .out .dot { background: var(--accent); }
+  .away { background: var(--gray-soft); color: var(--muted); } .away .dot { background: var(--muted); }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 20px 0 8px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 17px; }
+  li:last-child { border-bottom: 0; }
+  li span:last-child { color: var(--muted); white-space: nowrap; }
+  .about { font-size: 16px; margin: 14px 0 0; white-space: pre-line; }
+  .meta { color: var(--muted); margin: 6px 0 0; }
+  .btn { display: block; text-align: center; padding: 15px; border-radius: 14px; font-weight: 800; font-size: 17px; text-decoration: none; margin-top: 10px; }
+  .primary { background: var(--accent); color: #fff; }
+  .plain { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+  .note { color: var(--muted); font-size: 14px; text-align: center; margin-top: 12px; }
+  .msg { text-align: center; padding: 48px 0; color: var(--muted); }
+  footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 16px 32px; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <a class="brand" href="/porch-stand/"><img src="/porch-stand/icon.png" alt="" />Porch Stand</a>
+  <div id="app"><p class="msg">Loading the stand…</p></div>
+  <a class="btn primary" id="open" href="#">Follow in the Porch Stand app</a>
+  <a class="btn plain" href="https://apps.apple.com/app/id6835310225">Get Porch Stand on the App Store</a>
+  <p class="note">Free. Follow this stand and you'll get a notification when it sets out.</p>
+</main>
+<footer><a href="/porch-stand/">About Porch Stand</a> · <a href="/porch-stand/privacy.html">Privacy</a></footer>
+<script>
+(function () {
+  var SUPABASE = 'https://gsgnwlbykdgdzqijocot.supabase.co';
+  var KEY = 'sb_publishable_5y3yZ1c5vZs6AH6dne0Hcw_btM-Yiek';
+  var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var app = document.getElementById('app');
+  var id = new URLSearchParams(location.search).get('id') || '';
+  var openBtn = document.getElementById('open');
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function safeColor(c) { return /^#[0-9a-fA-F]{6}$/.test(c || '') ? c : '#2F7D4F'; }
+  function hm(t) {
+    if (!t) return '';
+    var p = t.split(':').map(Number), h = p[0], m = p[1];
+    var h12 = h % 12 === 0 ? 12 : h % 12, ap = h < 12 ? 'AM' : 'PM';
+    return m ? h12 + ':' + String(m).padStart(2, '0') + ' ' + ap : h12 + ' ' + ap;
+  }
+  function daysText(d) {
+    if (!d || !d.length) return '';
+    var s = d.slice().sort().join();
+    if (d.length === 7) return 'Every day';
+    if (s === '1,2,3,4,5') return 'Weekdays';
+    if (s === '0,6') return 'Weekends';
+    return d.slice().sort().map(function (x) { return DAYS[x]; }).join(', ');
+  }
+  function price(i) {
+    if (i.price_cents == null) return '';
+    var d = i.price_cents / 100, a = Number.isInteger(d) ? '$' + d : '$' + d.toFixed(2);
+    return i.unit ? a + ' / ' + i.unit : a;
+  }
+
+  if (!/^[0-9a-f-]{36}$/i.test(id)) { app.innerHTML = '<p class="msg">This link is missing its stand.</p>'; return; }
+  openBtn.href = 'porchstand://stand/' + id;
+
+  fetch(SUPABASE + '/rest/v1/rpc/ps_stand', {
+    method: 'POST',
+    headers: { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_id: id })
+  }).then(function (r) { return r.json(); }).then(function (s) {
+    if (!s || !s.id) { app.innerHTML = '<p class="msg">This stand isn’t on Porch Stand anymore.</p>'; return; }
+    document.title = s.name + ' · Porch Stand';
+    var out = s.out_now;
+    var list = out ? s.items : s.menu;
+    var sched = [daysText(s.days), s.opens && s.closes ? hm(s.opens) + '–' + hm(s.closes) : s.opens ? 'from ' + hm(s.opens) : ''].filter(Boolean).join(' · ');
+    var t = s.address;
+    var html = '<div class="hero"><div class="band" style="background:' + safeColor(s.color) + '"><h1>' + esc(s.name) + '</h1>' + (t ? '<p>📍 ' + esc(t) + '</p>' : '') + '</div>';
+    if (s.photos && s.photos.length) html += '<img class="cover" alt="" src="' + SUPABASE + '/storage/v1/object/public/ps-photos/' + encodeURI(s.photos[0]) + '" />';
+    html += '<div class="inner"><span class="pill ' + (out ? 'out' : 'away') + '"><span class="dot"></span>' + (out ? 'Out now' : 'Not out right now') + '</span>';
+    if (sched) html += '<p class="meta">Usually out ' + esc(sched) + '</p>';
+    if (s.schedule_note) html += '<p class="meta">' + esc(s.schedule_note) + '</p>';
+    if (s.about) html += '<p class="about">' + esc(s.about) + '</p>';
+    if (list && list.length) {
+      html += '<h2>' + (out ? 'On the stand now' : 'What they sell') + '</h2><ul>';
+      list.forEach(function (i) { html += '<li><span>' + esc((i.emoji ? i.emoji + ' ' : '') + i.name) + '</span><span>' + esc(price(i)) + '</span></li>'; });
+      html += '</ul>';
+    }
+    html += '</div></div>';
+    app.innerHTML = html;
+  }).catch(function () { app.innerHTML = '<p class="msg">Couldn’t load the stand. Check your connection and try again.</p>'; });
+})();
+</script>
+</body>
+</html>
