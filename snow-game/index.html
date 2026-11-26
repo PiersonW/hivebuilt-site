@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snow Game – Prototype</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="hud-top">
+    <div class="stat"><span class="label">SCORE</span><span id="hud-score">0</span></div>
+    <div class="stat"><span class="label">TIME</span><span id="hud-time">0:00.0</span></div>
+    <div class="stat"><span class="label">SPEED</span><span id="hud-speed">0</span><span class="unit">mph</span></div>
+  </div>
+  <div id="trick-live"></div>
+  <div id="popups"></div>
+  <div id="controls-help"></div>
+</div>
+
+<div id="menu" class="screen">
+  <h1>SNOW GAME</h1>
+  <p class="sub">Stage 1 prototype · ride feel test</p>
+  <div class="stance">
+    <span>Stance</span>
+    <button id="btn-regular" class="opt">Regular</button>
+    <button id="btn-goofy" class="opt">Goofy</button>
+  </div>
+  <p id="pad-help" class="warn hidden">Controller not reaching the game? Hold the Menu button (three lines) until a menu appears, then choose “Use game controls”. Then press A.</p>
+  <button id="btn-start" class="big">Drop in</button>
+  <button id="btn-fullscreen" class="opt small">Full screen</button>
+  <p class="hint">Keyboard: ←/→ change stance · Enter to start<br>Xbox: D-pad stance · A to start</p>
+  <div id="menu-controls"></div>
+</div>
+
+<div id="finish" class="screen hidden">
+  <h1>Run complete</h1>
+  <table id="summary"></table>
+  <div class="btns">
+    <button id="btn-lift" class="big">Ride the lift up</button>
+    <button id="btn-restart" class="opt">Skip to the top</button>
+  </div>
+  <p class="hint">Enter / A: ride the lift · R / Menu: skip to the top · Esc / View: menu</p>
+</div>
+
+<div id="lift-ui" class="hidden">
+  <div id="lift-top">
+    <div class="lift-name">🚡 Summit Express</div>
+    <div id="lift-status"></div>
+    <button id="btn-skip" class="opt small">Skip ride ⏭</button>
+  </div>
+  <div id="map-panel" class="panel"><div class="panel-title">Trail map</div><div id="map-wrap"></div></div>
+  <div id="hl-panel" class="panel">
+    <div class="panel-title">Your highlights</div>
+    <div id="hl-list"></div>
+    <p class="muted">1 / 2 / 3 or click to replay · Xbox: D-pad + A</p>
+  </div>
+  <div id="lift-hint">Drag the mouse or use the right stick to look around · Enter / Menu: skip to the top</div>
+</div>
+
+<div id="replay-ui" class="hidden">
+  <div id="replay-title"></div>
+  <div class="replay-btns">
+    <button id="replay-slow" class="opt small">S / X</button><span id="replay-speed"></span>
+    <button id="replay-camtoggle" class="opt small">C / Y</button><span id="replay-cam"></span>
+    <button id="replay-back" class="opt small">Back (Esc / B)</button>
+  </div>
+  <div class="muted">Drag or right stick to orbit</div>
+</div>
+
+<script type="module" src="src/main.js?v=1"></script>
+</body>
+</html>

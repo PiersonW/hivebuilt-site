@@ -1,0 +1,289 @@
+// A reusable chairlift: give it a bottom point and a top point and it builds stations, towers,
+// a cable loop and moving chairs, clears trees under the line and adds the towers as obstacles.
+//
+//   const lift = new Chairlift(scene, terrain, bottom, top, { name: 'Summit Express' });
+//   lift.update(dt);                         // every frame
+//   lift.loadPoint / lift.unloadPoint        // ground points for getting on and off
+//   lift.nextChairToLoad() -> chair index    // the chair about to reach the load point
+//   lift.chairState(i) -> { pos, dir, u }    // where a chair is; u = distance along the up line
+//   lift.seatPoint(i, side) -> Vector3       // a seat on chair i (side -1 = left, 1 = right)
+import * as THREE from 'three';
+
+const UP = new THREE.Vector3(0, 1, 0);
+const HANG = 2.6;           // cable to seat
+const WHEEL_R = 2.3;        // half the gap between the up and down cables
+
+export class Chairlift {
+  constructor(scene, terrain, bottom, top, opts = {}) {
+    this.scene = scene;
+    this.terrain = terrain;
+    this.name = opts.name || 'Chairlift';
+    this.speed = opts.speed || 20;            // m/s along the cable
+    this.spacing = opts.spacing || 34;        // m between chairs
+    this.towerSpacing = opts.towerSpacing || 75;
+    this.clearance = opts.clearance || 9;     // min height of the cable above the snow between towers
+    this.group = new THREE.Group();
+    scene.add(this.group);
+
+    // horizontal frame of the lift line
+    this.f = new THREE.Vector3(top.x - bottom.x, 0, top.z - bottom.z);
+    this.length = this.f.length();
+    this.f.normalize();
+    this.p = new THREE.Vector3(-this.f.z, 0, this.f.x);   // to the right when looking uphill
+    this.bottom = bottom.clone(); this.top = top.clone();
+    this.bottom.y = terrain.heightAt(bottom.x, bottom.z);
+    this.top.y = terrain.heightAt(top.x, top.z);
+
+    this._layoutTowers();
+    this._buildPath();
+    this._buildMeshes();
+    terrain.clearTreesAlong(this.bottom, this.top, 7);
+    for (const t of this.towers.slice(1, -1)) terrain.addObstacle(t.x, t.z, 0.7, t.y - terrain.terrainHeight(t.x, t.z), 'tower');
+
+    // load and unload spots on the snow, on the up-cable side
+    const side = this.p.clone().multiplyScalar(WHEEL_R);
+    this.loadPoint = this.bottom.clone().addScaledVector(this.f, 7).add(side);
+    this.loadPoint.y = terrain.heightAt(this.loadPoint.x, this.loadPoint.z);
+    this.unloadPoint = this.top.clone().addScaledVector(this.f, -7).add(side);
+    this.unloadPoint.y = terrain.heightAt(this.unloadPoint.x, this.unloadPoint.z);
+    this.loadU = 7; this.unloadU = this.upLength - 7;
+    this.phase = 0;
+  }
+
+  // Tower spots along the line and the cable height at each (stations included at both ends).
+  _layoutTowers() {
+    const T = this.terrain;
+    const n = Math.max(1, Math.round(this.length / this.towerSpacing));
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      let d = this.length * i / n;
+      const at = (dd) => this.bottom.clone().addScaledVector(this.f, dd);
+      if (i > 0 && i < n) {
+        // don't put a tower on a kicker
+        for (let tries = 0; tries < 6; tries++) {
+          const q = at(d);
+          if (!T.kickers.some(k => Math.hypot(q.x - k.x, q.z - k.z) < k.len + 5)) break;
+          d += 9;
+        }
+      }
+      const q = at(d);
+      q.y = T.heightAt(q.x, q.z) + (i === 0 || i === n ? HANG + 0.55 : this.clearance + 2);
+      pts.push(q);
+    }
+    // raise towers until every span clears the snow (skip the low station ends)
+    const groundAt = (x, z) => Math.max(T.heightAt(x + this.p.x * WHEEL_R, z + this.p.z * WHEEL_R), T.heightAt(x - this.p.x * WHEEL_R, z - this.p.z * WHEEL_R));
+    for (let iter = 0; iter < 20; iter++) {
+      let changed = false;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1];
+        let worst = 0;
+        for (let t = 0.05; t < 1; t += 0.05) {
+          const x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
+          const fromStation = Math.min(i === 0 ? t * a.distanceTo(b) : 99, i === pts.length - 2 ? (1 - t) * a.distanceTo(b) : 99);
+          if (fromStation < 30) continue;
+          const need = groundAt(x, z) + this.clearance - (a.y + (b.y - a.y) * t);
+          worst = Math.max(worst, need);
+        }
+        if (worst > 0.05) {
+          if (i > 0) a.y += worst; if (i < pts.length - 2) b.y += worst;
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
+    this.towers = pts;
+  }
+
+  // The cable loop: up line, around the top wheel, down line, around the bottom wheel.
+  _buildPath() {
+    const r = WHEEL_R, p = this.p, f = this.f;
+    const up = this.towers.map(t => t.clone().addScaledVector(p, r));
+    const down = this.towers.map(t => t.clone().addScaledVector(p, -r)).reverse();
+    const arc = (c, startDir, midDir) => {
+      const out = [];
+      for (let i = 0; i <= 12; i++) {
+        const a = Math.PI * i / 12;
+        out.push(c.clone().addScaledVector(startDir, Math.cos(a) * r).addScaledVector(midDir, Math.sin(a) * r));
+      }
+      return out;
+    };
+    const topC = this.towers[this.towers.length - 1], botC = this.towers[0];
+    const topArc = arc(topC, p, f);
+    const botArc = arc(botC, p.clone().negate(), f.clone().negate());
+    const loop = [...up, ...topArc.slice(1, -1), ...down, ...botArc.slice(1, -1)];
+    this.loop = loop;
+    this.cum = [0];
+    for (let i = 1; i <= loop.length; i++) this.cum.push(this.cum[i - 1] + loop[i - 1].distanceTo(loop[i % loop.length]));
+    this.total = this.cum[loop.length];
+    this.upLength = this.cum[up.length - 1];
+    this.nChairs = Math.floor(this.total / this.spacing);
+  }
+
+  _pointAt(u, outPos, outDir) {
+    u = ((u % this.total) + this.total) % this.total;
+    let lo = 0, hi = this.loop.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (this.cum[mid] <= u) lo = mid; else hi = mid - 1; }
+    const a = this.loop[lo], b = this.loop[(lo + 1) % this.loop.length];
+    const t = (u - this.cum[lo]) / Math.max(1e-6, this.cum[lo + 1] - this.cum[lo]);
+    outPos.lerpVectors(a, b, t);
+    outDir.subVectors(b, a); outDir.y = 0; outDir.normalize();
+  }
+
+  _buildMeshes() {
+    const g = this.group;
+    const steel = new THREE.MeshStandardMaterial({ color: 0x6b7380, roughness: 0.5, metalness: 0.4, flatShading: true });
+    const paint = new THREE.MeshStandardMaterial({ color: 0x2a64c8, roughness: 0.6, flatShading: true });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x23272e, roughness: 0.8 });
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a36, flatShading: true });
+    const yaw = Math.atan2(this.f.x, this.f.z);
+
+    // towers (skip the station ends)
+    for (const t of this.towers.slice(1, -1)) {
+      const gy = this.terrain.terrainHeight(t.x, t.z);
+      const h = t.y - gy;
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, h, 6), steel);
+      pole.position.set(t.x, gy + h / 2, t.z); pole.castShadow = true; g.add(pole);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(WHEEL_R * 2 + 1.2, 0.35, 0.5), paint);
+      arm.position.set(t.x, t.y + 0.25, t.z); arm.rotation.y = yaw; arm.castShadow = true; g.add(arm);
+      for (const s of [-1, 1]) {
+        const sheave = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 2.2), dark);
+        sheave.position.copy(t).addScaledVector(this.p, s * WHEEL_R); sheave.position.y = t.y + 0.05;
+        sheave.rotation.y = yaw; g.add(sheave);
+      }
+    }
+    // stations: bull wheel, roof and a hut
+    for (const [i, label] of [[0, 'LIFT'], [this.towers.length - 1, null]]) {
+      const c = this.towers[i];
+      const gy = this.terrain.heightAt(c.x, c.z);
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(WHEEL_R + 0.25, WHEEL_R + 0.25, 0.4, 16), paint);
+      wheel.position.copy(c); wheel.position.y += 0.3; g.add(wheel);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(WHEEL_R * 2 + 3, 0.4, 9), paint);
+      roof.position.set(c.x, c.y + 1.6, c.z); roof.rotation.y = yaw; roof.castShadow = true; g.add(roof);
+      for (const s of [-1, 1]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, c.y + 1.6 - gy, 0.4), steel);
+        post.position.copy(c).addScaledVector(this.f, s * 3.5); post.position.y = (gy + c.y + 1.6) / 2; g.add(post);
+      }
+      const hut = new THREE.Mesh(new THREE.BoxGeometry(3, 2.6, 3), wood);
+      hut.position.copy(c).addScaledVector(this.p, -(WHEEL_R + 4)); hut.position.y = this.terrain.heightAt(hut.position.x, hut.position.z) + 1.3;
+      hut.rotation.y = yaw; hut.castShadow = true; g.add(hut);
+      if (label) g.add(this._sign(label, c.clone().addScaledVector(this.p, WHEEL_R + 3.5).addScaledVector(this.f, -10)));
+    }
+    // lift line corral at the bottom: two rope fences leading to the load point
+    const ropeMat = new THREE.MeshStandardMaterial({ color: 0xff8a1f });
+    const b0 = this.towers[0];
+    for (const s of [0.6, 4.2]) {
+      for (let d = -22; d <= 2; d += 4) {
+        const q = b0.clone().addScaledVector(this.f, d).addScaledVector(this.p, s);
+        const y = this.terrain.heightAt(q.x, q.z);
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.1, 5), dark);
+        post.position.set(q.x, y + 0.55, q.z); g.add(post);
+        if (d < 2) {
+          const q2 = q.clone().addScaledVector(this.f, 4);
+          const y2 = this.terrain.heightAt(q2.x, q2.z);
+          const rope = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 4), ropeMat);
+          rope.position.set((q.x + q2.x) / 2, (y + y2) / 2 + 0.95, (q.z + q2.z) / 2);
+          rope.rotation.y = yaw; rope.rotation.x = -Math.atan2(y2 - y, 4); g.add(rope);
+        }
+      }
+    }
+    // cable
+    const cablePts = [...this.loop, this.loop[0]];
+    const cable = new THREE.Line(new THREE.BufferGeometry().setFromPoints(cablePts), new THREE.LineBasicMaterial({ color: 0x222222 }));
+    g.add(cable);
+    // chairs
+    this.chairs = [];
+    const chairGeo = this._chairParts();
+    for (let i = 0; i < this.nChairs; i++) {
+      const c = new THREE.Group();
+      for (const [geo, pos, rot] of chairGeo) {
+        const m = new THREE.Mesh(geo, geo === chairGeo[0][0] || geo === chairGeo[1][0] ? steel : paint);
+        m.position.copy(pos); if (rot) m.rotation.x = rot; m.castShadow = true; c.add(m);
+      }
+      g.add(c);
+      this.chairs.push(c);
+    }
+    this._tmpP = new THREE.Vector3(); this._tmpD = new THREE.Vector3();
+  }
+
+  // Chair parts in chair space: origin at the cable grip, forward = -z.
+  _chairParts() {
+    return [
+      [new THREE.BoxGeometry(0.08, HANG - 0.1, 0.08), new THREE.Vector3(0, -(HANG - 0.1) / 2, 0.32)],     // hanger
+      [new THREE.BoxGeometry(1.5, 0.06, 0.06), new THREE.Vector3(0, -HANG + 0.05, 0.32)],                  // crossbar
+      [new THREE.BoxGeometry(1.5, 0.08, 0.55), new THREE.Vector3(0, -HANG, 0.02)],                         // seat
+      [new THREE.BoxGeometry(1.5, 0.6, 0.06), new THREE.Vector3(0, -HANG + 0.35, 0.32), 0.15],             // back
+      [new THREE.BoxGeometry(1.5, 0.05, 0.05), new THREE.Vector3(0, -HANG + 0.62, -0.42)],                 // safety bar
+      [new THREE.BoxGeometry(1.4, 0.04, 0.3), new THREE.Vector3(0, -HANG - 0.45, -0.45)],                  // footrest
+    ];
+  }
+
+  _sign(text, pos) {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 96;
+    const x = c.getContext('2d');
+    x.fillStyle = '#163566'; x.fillRect(0, 0, 256, 96);
+    x.fillStyle = '#fff'; x.font = 'bold 38px Trebuchet MS, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(text, 128, 36);
+    x.font = '20px Trebuchet MS, sans-serif'; x.fillText(this.name, 128, 74);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const g = new THREE.Group();
+    const y = this.terrain.heightAt(pos.x, pos.z);
+    const board = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.1), [0, 0, 0, 0, 0, 0].map((_, i) => i === 4 || i === 5 ? new THREE.MeshStandardMaterial({ map: tex }) : new THREE.MeshStandardMaterial({ color: 0x163566 })));
+    board.position.set(pos.x, y + 2.4, pos.z);
+    board.rotation.y = Math.atan2(this.f.x, this.f.z) + Math.PI;
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2, 5), new THREE.MeshStandardMaterial({ color: 0x23272e }));
+    post.position.set(pos.x, y + 1, pos.z);
+    g.add(board, post);
+    return g;
+  }
+
+  update(dt) {
+    this.phase = (this.phase + this.speed * dt) % this.total;
+    for (let i = 0; i < this.chairs.length; i++) {
+      const u = this.phase + i * (this.total / this.chairs.length);
+      this._pointAt(u, this._tmpP, this._tmpD);
+      const c = this.chairs[i];
+      c.position.copy(this._tmpP);
+      c.rotation.y = Math.atan2(-this._tmpD.x, -this._tmpD.z);
+    }
+  }
+
+  chairU(i) { return ((this.phase + i * (this.total / this.chairs.length)) % this.total + this.total) % this.total; }
+
+  chairState(i) {
+    const pos = new THREE.Vector3(), dir = new THREE.Vector3();
+    const u = this.chairU(i);
+    this._pointAt(u, pos, dir);
+    return { pos, dir, u };
+  }
+
+  // The chair that will reach the load point next.
+  nextChairToLoad() {
+    let best = 0, bestGap = Infinity;
+    for (let i = 0; i < this.chairs.length; i++) {
+      const gap = (this.loadU - this.chairU(i) + this.total) % this.total;
+      if (gap < bestGap) { bestGap = gap; best = i; }
+    }
+    return { index: best, wait: bestGap / this.speed };
+  }
+
+  // World position of a seat. side: -1 left, +1 right (as seen sitting on the chair).
+  seatPoint(i, side = -1) {
+    this.chairs[i].updateMatrixWorld();
+    return this.chairs[i].localToWorld(new THREE.Vector3(side * 0.38, -HANG + 0.05, 0.02));
+  }
+
+  // A point in chair i's own space (x = toward the right cable side, y up from the grip, z = backwards).
+  chairToWorld(i, v) {
+    this.chairs[i].updateMatrixWorld();
+    return this.chairs[i].localToWorld(v.clone());
+  }
+
+  // Seconds until chair i reaches the unload point (0 if past it).
+  timeToTop(i) {
+    const u = this.chairU(i);
+    return u <= this.unloadU ? (this.unloadU - u) / this.speed : 0;
+  }
+
+  // Jump the lift forward so that chair i is at distance u along the cable (used to skip the ride).
+  setChairU(i, u) { this.phase = ((u - i * (this.total / this.chairs.length)) % this.total + this.total) % this.total; this.update(0); }
+}
