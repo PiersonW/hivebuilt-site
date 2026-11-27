@@ -12,10 +12,10 @@ export const TUNE = {
   grip: 8.5,              // how fast sideways slide is killed (carve)
   tuckGrip: 5.0,
   brakeGrip: 2.2,
-  carveKeep: 0.72,        // share of sideways speed turned into forward speed while carving
+  carveScrub: 0.12,       // share of speed lost per radian the carve turns you
   snowFriction: 0.045,
-  drag: 0.0082,           // normal stance air drag (v^2)
-  tuckDrag: 0.0047,
+  drag: 0.0050,           // normal stance air drag (v^2)
+  tuckDrag: 0.0026,
   standDrag: 0.02,
   brakeDecel: 11,
   jumpBase: 3.6,          // m/s pop with no charge
@@ -23,14 +23,18 @@ export const TUNE = {
   chargeTime: 0.55,
   spinRate: 7.6,          // rad/s in the air
   flipRate: 7.2,
-  landSpinTol: 0.75,      // rad (~43 deg) off the travel line and you crash
-  landFlipTol: 0.95,      // rad (~55 deg) off upright and you crash
+  landSpinTol: 1.0,       // rad (~57 deg) off the travel line and you crash
+  landFlipTol: 1.25,      // rad (~72 deg) off upright and you crash
   phantomTime: 0.75,
   airGravity: 0.85,       // a little floaty in the air (arcade)
   maxLaunch: 7.5,         // m/s off a kicker, measured away from the landing slope
   maxSpeed: 26.5,         // m/s (~59 mph): above this the snow starts holding you back
   topSpeed: 65 / 2.237,   // hard cap: 65 mph
-  crashTime: 2.2,
+  crashTime: 4,           // longest tumble before getting up
+  getupTime: 1.3,         // seconds to stand back up
+  landImpact: 32,         // m/s into the slope = too hard a landing
+  railFriction: 1.2,      // m/s^2 slowing on rails and boxes
+  skateMaxUphill: 0.07,   // you can only skate on flats or very gentle uphill (lift lines)
   crashFriction: 9,       // m/s^2 slowing while tumbling
   crashMaxSpeed: 14,      // m/s, tumble speed right after a crash
 };
@@ -89,6 +93,10 @@ export class Rider {
     this.crashSpin = new THREE.Vector3();
     this.crashQ = new THREE.Quaternion();
     this.spray = 0;
+    this.edge = -1;             // edge you're on: 1 = toe, -1 = heel (used by the brake skid)
+    this.brakeEdge = -1;
+    this.getupT = -1;
+    this.rail = null; this.railCooldown = 0; this.boardslide = 0;
     this._buildModel();
   }
 
@@ -151,7 +159,7 @@ export class Rider {
     const P = this.pose;
     const sig = this.regular ? 1 : -1;          // toe edge side in board frame (+x for regular)
     const grab = this.state === 'air' ? this.grab : null;
-    const crashing = this.state === 'crash';
+    const crashing = this.state === 'crash' && this.getupT < 0;
     const phantom = this.phantomT >= 0;
 
     // targets
@@ -166,6 +174,9 @@ export class Rider {
     if (crashing) { hipH = 0.95; lean = -0.2; }
     const seated = this.state === 'lift';
     if (seated) { hipH = 0.5; lean = -0.12; }
+    const gettingUp = this.state === 'crash' && this.getupT >= 0;
+    const gu = gettingUp ? this.getupT : 0;
+    if (gettingUp) { hipH = 0.4 + 0.5 * gu; lean = 0.9 * (1 - gu) + 0.15; }
     const r = 16;
     P.hipH = damp(P.hipH, hipH, r, dt); P.lean = damp(P.lean, lean, r, dt);
     P.boardLift = damp(P.boardLift, boardLift, r, dt); P.boardRX = damp(P.boardRX, rx, r, dt);
@@ -236,6 +247,12 @@ export class Rider {
     if (grab === 'Nose Grab') t[lead] = this._boardToBody(new THREE.Vector3(0, 0.08, -0.7), false);
     if (phantom) { t[0] = sh[0].clone().add(new THREE.Vector3(0.3, 0.5, 0.1)); t[1] = sh[1].clone().add(new THREE.Vector3(-0.3, 0.5, 0.1)); }
     if (seated) { t[0] = new THREE.Vector3(0.2, 0.62, 0.3); t[1] = new THREE.Vector3(-0.2, 0.62, 0.3); }
+    if (gettingUp && gu < 0.55) {   // hands push off the snow
+      t[0] = new THREE.Vector3(0.35, 0.05, 0.35); t[1] = new THREE.Vector3(-0.35, 0.05, 0.35);
+    }
+    if (this.state === 'grind') {   // arms out for balance
+      t[0] = sh[0].clone().add(new THREE.Vector3(0.5, -0.12, 0.05)); t[1] = sh[1].clone().add(new THREE.Vector3(-0.5, -0.12, 0.05));
+    }
     if (crashing) {
       const w = performance.now() / 120;
       t[0] = sh[0].clone().add(new THREE.Vector3(0.4, 0.3 * Math.sin(w), 0.3 * Math.cos(w)));
@@ -259,6 +276,7 @@ export class Rider {
     this.state = 'ride'; this.switch = false;
     this.flip = 0; this.flipVel = 0; this.spinVel = 0; this.grab = null; this.phantomT = -1;
     this.crouch = 0; this.charge = 0; this.lean = 0; this.brakeAmt = 0;
+    this.getupT = -1; this.rail = null; this.boardslide = 0;
     this.terrain.normalAt(pos.x, pos.z, this.normal);
     this.alignQ.setFromUnitVectors(UP, this.normal);
   }
@@ -277,7 +295,10 @@ export class Rider {
     if (this.state === 'lift') return;
     if (this.state === 'ride') this._ground(dt, input);
     else if (this.state === 'air') this._air(dt, input);
+    else if (this.state === 'grind') this._grind(dt, input);
     else if (this.state === 'crash') this._crash(dt);
+    this.railCooldown = Math.max(0, this.railCooldown - dt);
+    if ((this.state === 'ride' || this.state === 'air') && this.railCooldown <= 0) this._tryRail();
     // hard top speed (65 mph), on the ground and in the air
     const v = this.vel.length();
     if (v > TUNE.topSpeed) this.vel.multiplyScalar(TUNE.topSpeed / v);
@@ -309,6 +330,11 @@ export class Rider {
     if (brake) rate *= 1.3;
     this.yaw += input.steer * rate * dt;
     this.lean = damp(this.lean, input.steer * (0.25 + 0.45 * k) * (brake ? 0.4 : 1), 8, dt);
+    // which edge are we on? turning toward the side you face = toe edge
+    const faceSign = (this.regular ? 1 : -1) * (this.switch ? -1 : 1);
+    if (!brake && Math.abs(this.lean) > 0.06) this.edge = Math.sign(this.lean) === faceSign ? 1 : -1;
+    if (brake && this.brakeAmt < 0.05) this.brakeEdge = this.edge;     // skid on the edge you were on
+    if (!brake && this.brakeAmt < 0.05) this.brakeEdge = this.edge;
 
     // board axes on the slope
     const f = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -320,14 +346,21 @@ export class Rider {
     this.vel.addScaledVector(gt, dt);
     this.vel.addScaledVector(n, -this.vel.dot(n));
 
-    // carve: kill sideways slide, keep part of it as forward speed
+    // carve: swing the travel direction toward the board's direction. Turning only ever costs speed
+    // (a little when carving, a lot when skidding), it never adds any.
     let vf = this.vel.dot(f), vs = this.vel.dot(side);
-    const grip = brake ? T.brakeGrip : tuck ? T.tuckGrip : T.grip;
-    const nvs = vs * Math.exp(-grip * dt);
-    const lost = Math.abs(vs) - Math.abs(nvs);
-    vf += Math.sign(vf || 1) * lost * (brake ? 0 : T.carveKeep);
-    this.vel.copy(f).multiplyScalar(vf).addScaledVector(side, nvs);
-    this.slide = Math.abs(nvs);
+    const spd = Math.hypot(vf, vs);
+    if (spd > 0.05) {
+      const dir = vf >= 0 ? 1 : -1;                         // moving forward or backward along the board
+      const slip = Math.atan2(vs, Math.abs(vf));            // angle between travel and the board
+      const grip = brake ? T.brakeGrip : tuck ? T.tuckGrip : T.grip;
+      const newSlip = slip * Math.exp(-grip * dt);
+      const turned = Math.abs(slip - newSlip);
+      const s2 = spd * Math.max(0, 1 - turned * (brake ? 0.6 : T.carveScrub));
+      vf = dir * s2 * Math.cos(newSlip); vs = s2 * Math.sin(newSlip);
+      this.vel.copy(f).multiplyScalar(vf).addScaledVector(side, vs);
+    }
+    this.slide = Math.abs(vs);
 
     // going backwards -> now riding switch
     if (vf < -0.8) { this.yaw = wrap(this.yaw + Math.PI); this.switch = !this.switch; }
@@ -338,8 +371,8 @@ export class Rider {
     let dec = T.snowFriction * G * n.y + drag * sp * sp + (brake ? T.brakeDecel : 0) + (stand ? 1.2 : 0);
     if (sp > T.maxSpeed) dec += (sp - T.maxSpeed) * 1.5;   // soft speed limit
     if (sp > 1e-3) this.vel.multiplyScalar(Math.max(0, sp - dec * dt) / sp);
-    // skating push when nearly stopped
-    if (sp < 4 && !brake) this.vel.addScaledVector(f, 2.5 * dt);
+    // skating push when nearly stopped (flats and lift lines only, never up a real slope)
+    if (sp < 4 && !brake && f.y < T.skateMaxUphill) this.vel.addScaledVector(f, 2.5 * dt);
 
     // jump charge / pop
     if (input.jump) this.charge = Math.min(1, this.charge + dt / T.chargeTime);
@@ -353,8 +386,8 @@ export class Rider {
       this.vel.addScaledVector(n, pop);
       this.pos.copy(next); this.pos.y = Math.max(next.y, gh) + 0.02;
       this._takeoff(true);
-    } else if (next.y > gh + 0.06 + 0.002 * sp) {
-      // ground fell away under us (kicker lip, cliff, crest)
+    } else if (next.y - gh > 1.6 * 0.5 * G * n.y * dt * dt + 0.0004) {
+      // the ground curves away faster than gravity can hold us on it (lips, cliffs, sharp crests)
       this.pos.copy(next);
       this._takeoff(false);
     } else {
@@ -370,7 +403,7 @@ export class Rider {
     this.spray = Math.min(1, this.slide * 0.25 + this.brakeAmt * Math.min(1, sp / 8) + Math.abs(input.steer) * k * 0.4);
   }
 
-  _takeoff(ollie) {
+  _takeoff(ollie, fromGrind = false) {
     // keep kicker airs in a predictable range: cap the launch speed away from the slope below
     const ahead = this.pos.clone().addScaledVector(new THREE.Vector3(this.vel.x, 0, this.vel.z).normalize(), 10);
     const ln = this.terrain.normalAt(ahead.x, ahead.z);
@@ -386,7 +419,8 @@ export class Rider {
     if (t.lengthSq() < 1e-4) t.set(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     t.normalize();
     this.flipAxis.crossVectors(UP, t).normalize();
-    this.events.push({ type: 'takeoff', ollie });
+    this.boardslide = 0; this.rail = null;
+    this.events.push({ type: 'takeoff', ollie, fromGrind });
   }
 
   _air(dt, input) {
@@ -418,7 +452,7 @@ export class Rider {
       this.flipVel = damp(this.flipVel, 0, 8, dt);
       // gentle self-righting when close to upright
       const off = wrap(this.flip);
-      if (Math.abs(off) < 0.9 && Math.abs(this.flipVel) < 3) this.flipVel += -off * 10 * dt;
+      if (Math.abs(off) < 1.2 && Math.abs(this.flipVel) < 3) this.flipVel += -off * 10 * dt;
     }
     const dFlip = this.flipVel * dt;
     this.flip += dFlip;
@@ -454,7 +488,7 @@ export class Rider {
     if (this.phantomT >= 0) reason = 'Board not back on!';
     else if (flipOff > T.landFlipTol) reason = 'Landed on your head!';
     else if (!(Math.abs(d) < T.landSpinTol || Math.abs(d) > Math.PI - T.landSpinTol)) reason = 'Landed sideways!';
-    else if (impact > 26) reason = 'Too hard a landing!';
+    else if (impact > T.landImpact) reason = 'Too hard a landing!';
     if (reason) { this.doCrash(reason); return; }
     this.switch = Math.abs(d) > Math.PI / 2;
     this.yaw = vh;
@@ -470,9 +504,9 @@ export class Rider {
   doCrash(reason) {
     if (this.state === 'crash') return;
     this.state = 'crash';
-    this.crashT = 0;
-    this.grab = null; this.phantomT = -1;
-    this.crashSpin.set((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 14);
+    this.crashT = 0; this.getupT = -1;
+    this.grab = null; this.phantomT = -1; this.rail = null; this.boardslide = 0;
+    this.crashSpin.set((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 10);
     this.crashQ.copy(this.root.quaternion);
     if (reason.startsWith('Hit')) this.vel.multiplyScalar(-0.15);
     // keep crashes low: no upward launch, and cap the tumble speed
@@ -483,19 +517,22 @@ export class Rider {
   }
 
   _crash(dt) {
-    // tumble along the snow: stay on the ground, lose speed fast, never bounce high
     this.crashT += dt;
+    if (this.getupT >= 0) { this._getup(dt); return; }
+    // tumble along the snow: stay on the ground, lose speed fast, never bounce high
     this.vel.y -= G * dt;
     this.pos.addScaledVector(this.vel, dt);
     const gh = this.terrain.heightAt(this.pos.x, this.pos.z);
+    let onGround = false;
     if (this.pos.y < gh + 0.3) {
+      onGround = true;
       this.pos.y = gh + 0.3;
       const n = this.terrain.normalAt(this.pos.x, this.pos.z);
       const vn = this.vel.dot(n);
       if (vn < 0) this.vel.addScaledVector(n, -vn * 1.12);          // tiny bounce
       const sp = this.vel.length();
       if (sp > 1e-3) this.vel.multiplyScalar(Math.max(0, sp - TUNE.crashFriction * dt) / sp);
-      this.crashSpin.multiplyScalar(Math.exp(-2.2 * dt));
+      this.crashSpin.multiplyScalar(Math.exp(-2.6 * dt));
       this.spray = Math.min(1, sp / 10);
     } else this.spray = 0;
     // a tumbling rider doesn't slide through trees
@@ -506,7 +543,111 @@ export class Rider {
       const dq = new THREE.Quaternion().setFromAxisAngle(this.crashSpin.clone().normalize(), w * dt);
       this.crashQ.premultiply(dq);
     }
-    if (this.crashT > TUNE.crashTime) this.events.push({ type: 'respawn' });
+    // once we've stopped sliding, get back up
+    if ((onGround && this.vel.length() < 1.5 && this.crashT > 0.9) || this.crashT > TUNE.crashTime) this._startGetup();
+  }
+
+  _startGetup() {
+    this.getupT = 0;
+    this.vel.set(0, 0, 0);
+    this.spray = 0;
+    this.getupFromQ = this.crashQ.clone();
+    this.getupFromPos = this.pos.clone();
+    // step out of any tree we ended up against
+    for (let i = 0; i < 8; i++) {
+      const t = this.terrain.treeNear(this.pos.x, this.pos.z);
+      if (!t) break;
+      const dx = this.pos.x - t.x, dz = this.pos.z - t.z, l = Math.hypot(dx, dz) || 1;
+      this.pos.x += dx / l * 1.0; this.pos.z += dz / l * 1.0;
+    }
+    this.pos.y = this.terrain.heightAt(this.pos.x, this.pos.z);
+    // face down the run we're on (or straight down the hill)
+    const n = this.terrain.normalAt(this.pos.x, this.pos.z, this.normal);
+    let dx = n.x, dz = n.z;
+    const ra = this.terrain.runAt ? this.terrain.runAt(this.pos.x, this.pos.z) : null;
+    if (ra && ra.d < ra.run.hw + 30) { const a = ra.run.at(ra.s + 8); dx = a.tx; dz = a.tz; }
+    this.yaw = Math.atan2(dx, -dz);
+    this.switch = false;
+    this.alignQ.setFromUnitVectors(UP, n);
+    this.getupToQ = this.alignQ.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, -this.yaw));
+  }
+
+  _getup(dt) {
+    this.getupT = Math.min(1, this.getupT + dt / TUNE.getupTime);
+    if (this.getupT >= 1) {
+      this.getupT = -1;
+      this.state = 'ride';
+      this.crouch = 0.5;
+      this.vel.set(Math.sin(this.yaw), 0, -Math.cos(this.yaw)).multiplyScalar(1.5);
+      this.events.push({ type: 'recovered' });
+    }
+  }
+
+  // ---------------- rails and boxes ----------------
+  _tryRail() {
+    const rails = this.terrain.rails;
+    if (!rails) return;
+    const p = this.pos, v = this.vel, vh = Math.hypot(v.x, v.z);
+    if (vh < 2 || v.y > 2.5) return;
+    for (const r of rails) {
+      const dx = p.x - r.p0.x, dz = p.z - r.p0.z;
+      if (dx * dx + dz * dz > (r.lenH + 3) * (r.lenH + 3)) continue;
+      const u = (dx * r.dirH.x + dz * r.dirH.z) / r.lenH;
+      if (u < 0.02 || u > 0.97) continue;
+      const lat = Math.abs(-dx * r.dirH.z + dz * r.dirH.x);
+      if (lat > r.halfW + 0.35) continue;
+      const ry = r.p0.y + (r.p1.y - r.p0.y) * u;
+      const dy = p.y - ry;
+      if (dy < -0.45 || dy > 0.75) continue;
+      const along = (v.x * r.dirH.x + v.z * r.dirH.z) / vh;
+      if (Math.abs(along) < 0.6) continue;
+      this._startGrind(r, u, along);
+      return;
+    }
+  }
+
+  _startGrind(r, u, along) {
+    const wasAir = this.state === 'air';
+    const railHead = Math.atan2(r.dirH.x * Math.sign(along), -r.dirH.z * Math.sign(along));
+    // board across the rail = boardslide; along it = 50-50 (forwards or switch)
+    const boardYaw = wasAir ? this.airYaw : this.yaw + (this.switch ? Math.PI : 0);
+    const d = wrap(boardYaw - railHead);
+    this.boardslide = Math.abs(Math.abs(d) - Math.PI / 2) < 0.6 ? Math.sign(d) : 0;
+    this.switch = !this.boardslide && Math.abs(d) > Math.PI / 2;
+    this.state = 'grind';
+    this.rail = r;
+    this.railU = u * r.len;
+    this.railV = this.vel.dot(r.dir3);
+    this.yaw = railHead;
+    this.flip = 0; this.flipVel = 0; this.grab = null; this.phantomT = -1;
+    this._slideLatch = true;
+    this.events.push({ type: 'grind-start', fromAir: wasAir });
+  }
+
+  _grind(dt, input) {
+    const r = this.rail;
+    this.railV += -G * r.dir3.y * dt;                                   // gravity along the rail
+    this.railV -= Math.sign(this.railV) * Math.min(Math.abs(this.railV), TUNE.railFriction * dt);
+    this.railU += this.railV * dt;
+    // left/right while grinding swaps between 50-50 and boardslide
+    if (!input.steer) this._slideLatch = false;
+    else if (!this._slideLatch) { this._slideLatch = true; this.boardslide = this.boardslide ? 0 : Math.sign(input.steer); }
+    this.pos.copy(r.p0).addScaledVector(r.dir3, this.railU); this.pos.y += r.top;
+    this.vel.copy(r.dir3).multiplyScalar(this.railV);
+    this.crouch = damp(this.crouch, 0.35, 8, dt); this.lean = damp(this.lean, 0, 8, dt);
+    this.brakeAmt = 0; this.spray = 0;
+    const name = r.kind === 'box' ? (this.boardslide ? 'Box Slide' : 'Box 50-50') : (this.boardslide ? 'Boardslide' : '50-50');
+    this.events.push({ type: 'grind', name, dt });
+    // pop off with a jump, or ride off the end
+    if (input.jump) this.charge = Math.min(1, this.charge + dt / TUNE.chargeTime);
+    if (!input.jump && this.charge > 0) {
+      this.vel.y += TUNE.jumpBase + TUNE.jumpCharge * this.charge * 0.7; this.charge = 0;
+      this.railCooldown = 0.4; this._takeoff(true, true); return;
+    }
+    if (this.railU < 0 || this.railU > r.len || Math.abs(this.railV) < 0.4) {
+      this.vel.y += 0.8; this.pos.y += 0.05;
+      this.railCooldown = 0.4; this._takeoff(false, true);
+    }
   }
 
   // ---------------- visuals ----------------
@@ -523,17 +664,24 @@ export class Rider {
       return;
     }
     root.position.copy(this.pos);
-    if (this.state === 'crash') {
+    if (this.state === 'crash' && this.getupT >= 0) {
+      const e = this.getupT * this.getupT * (3 - 2 * this.getupT);
+      root.quaternion.slerpQuaternions(this.getupFromQ, this.getupToQ, e);
+      root.position.lerpVectors(this.getupFromPos, this.pos, e);
+    } else if (this.state === 'crash') {
       root.quaternion.copy(this.crashQ);
     } else {
+      const onSnow = this.state === 'ride' || this.state === 'grind';
       const targetAlign = new THREE.Quaternion().setFromUnitVectors(UP, this.state === 'ride' ? this.normal : UP);
-      this.alignQ.slerp(targetAlign, 1 - Math.exp(-(this.state === 'ride' ? 18 : 3) * dt));
+      this.alignQ.slerp(targetAlign, 1 - Math.exp(-(onSnow ? 18 : 3) * dt));
       const q = new THREE.Quaternion();
-      if (this.state === 'ride') {
-        const brakeTwist = this.brakeAmt * 1.25;
-        const vis = this.yaw + (this.switch ? Math.PI : 0) + brakeTwist;
+      if (onSnow) {
+        // brake: skid the board sideways onto the edge you were riding (toe or heel)
+        const faceSign = (this.regular ? 1 : -1) * (this.switch ? -1 : 1);
+        const brakeTwist = this.brakeAmt * 1.25 * faceSign * this.brakeEdge;
+        const vis = this.yaw + (this.switch ? Math.PI : 0) + brakeTwist + this.boardslide * Math.PI / 2;
         const leanSign = this.switch ? -1 : 1;
-        const lean = -this.lean * leanSign + this.brakeAmt * 0.25 * (this.regular ? 1 : -1) * leanSign;
+        const lean = -this.lean * leanSign + this.brakeAmt * 0.25 * faceSign * this.brakeEdge * leanSign;
         q.copy(this.alignQ)
           .multiply(new THREE.Quaternion().setFromAxisAngle(UP, -vis))
           .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), lean));

@@ -12,6 +12,7 @@ export class TrickTracker {
     this.spin = 0; this.flip = 0;
     this.grabs = new Map();   // name -> seconds held
     this.grabOrder = [];
+    this.grinds = new Map();  // name -> seconds on the rail / box
     this.phantoms = 0;
     this.phantomOn = false;
     this.airTime = 0;
@@ -25,6 +26,8 @@ export class TrickTracker {
     else if (ev.type === 'grab') {
       if (!this.grabs.has(ev.name)) { this.grabs.set(ev.name, 0); this.grabOrder.push(ev.name); }
       this.grabs.set(ev.name, this.grabs.get(ev.name) + ev.dt);
+    } else if (ev.type === 'grind') {
+      this.grinds.set(ev.name, (this.grinds.get(ev.name) || 0) + ev.dt);
     } else if (ev.type === 'phantom-start') this.phantomOn = true;
     else if (ev.type === 'phantom-done') { this.phantoms++; this.phantomOn = false; }
   }
@@ -40,6 +43,7 @@ export class TrickTracker {
       const pre = flips === 2 ? 'Double ' : flips === 3 ? 'Triple ' : flips > 3 ? `${flips}x ` : '';
       out.push({ name: pre + dir, pts: 500 * flips + (flips > 1 ? 300 * (flips - 1) : 0) });
     }
+    for (const [g, t] of this.grinds) if (t > 0.15) out.push({ name: g, pts: Math.round(200 + 260 * Math.min(t, 4)) });
     if (spinDeg >= 180) out.push({ name: `${spinDeg}`, pts: SPIN_PTS[spinDeg] || (2300 + (spinDeg - 1440) * 4) });
     for (const g of this.grabOrder) {
       const t = this.grabs.get(g);

@@ -62,7 +62,9 @@ export class TrailMap {
     }
     // kickers and the cliff
     g.fillStyle = '#ff7a1a';
-    for (const k of T.kickers) { const [x, y] = this.toMap(k.x, k.z); g.fillRect(x - 3, y - 2.5, 6, 5); }
+    for (const k of T.kickers) { const [x, y] = this.toMap(k.x, k.z); g.fillRect(x - 2.5, y - 2, 5, 4); }
+    g.strokeStyle = '#333'; g.lineWidth = 2;
+    for (const r of T.rails || []) { const [x1, y1] = this.toMap(r.p0.x, r.p0.z), [x2, y2] = this.toMap(r.p1.x, r.p1.z); g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }
     const chute = T.runs.find(r => r.cliffS !== undefined);
     if (chute) {
       const a = chute.at(chute.cliffS);

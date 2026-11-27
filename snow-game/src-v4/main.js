@@ -1,6 +1,6 @@
 // Game setup and main loop.
 import * as THREE from 'three';
-import { Terrain, BASE_Z, RIDGE_TOP, EXPRESS_TOP } from './terrain.js';
+import { Terrain, BASE_Z, RIDGE_TOP, EXPRESS_TOP, LIFT_BOTTOMS } from './terrain.js';
 import { setupSky, buildRange, buildLodge } from './scenery.js';
 import { Rider } from './rider.js';
 import { TrickTracker } from './tricks.js';
@@ -44,10 +44,10 @@ const SUN_OFFSET = SUN_DIR.clone().multiplyScalar(150);
 
 // lifts (defined first so the forest leaves their lines open)
 const LIFTS = [
-  { name: 'Summit Express', bottom: new THREE.Vector3(140, 0, -1404), top: new THREE.Vector3(EXPRESS_TOP.x, 0, EXPRESS_TOP.z), speed: 26 },
-  { name: 'Ridge Lift', bottom: new THREE.Vector3(-262, 0, -1404), top: new THREE.Vector3(RIDGE_TOP.x, 0, RIDGE_TOP.z + 6), speed: 20 },
+  { name: 'Summit Express', bottom: new THREE.Vector3(LIFT_BOTTOMS.express.x, 0, LIFT_BOTTOMS.express.z), top: new THREE.Vector3(EXPRESS_TOP.x, 0, EXPRESS_TOP.z), speed: 13 },
+  { name: 'Ridge Lift', bottom: new THREE.Vector3(LIFT_BOTTOMS.ridge.x, 0, LIFT_BOTTOMS.ridge.z), top: new THREE.Vector3(RIDGE_TOP.x, 0, RIDGE_TOP.z + 6), speed: 10 },
 ];
-const terrain = new Terrain(scene, { treeSpacing: LOW_GFX ? 9.5 : 6.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
+const terrain = new Terrain(scene, { treeSpacing: LOW_GFX ? 12 : 9.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
 buildRange(scene, terrain);
 buildLodge(scene, terrain, -40, BASE_Z - 68);
 for (const dx of [-9.5, 0, 9.5]) terrain.addObstacle(-40 + dx, BASE_Z - 68, 6.5, 12, 'lodge');
@@ -111,7 +111,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
+window.__game = { IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -171,15 +171,15 @@ function startLift(l = lifts[0], doGlide = false) {
 }
 
 function updateGlide(dt) {
-  glide.t = Math.min(1, glide.t + dt / 1.6);
+  glide.t = Math.min(1, glide.t + dt / 0.7);
   const e = glide.t * glide.t * (3 - 2 * glide.t);
   const p = glide.from.clone().lerp(curLift.loadPoint, e);
   p.y = terrain.heightAt(p.x, p.z);
   let dy = glide.yaw1 - glide.yaw0; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
   rider.pos.copy(p); rider.yaw = glide.yaw0 + dy * e;
-  rider.vel.set(Math.sin(rider.yaw), 0, -Math.cos(rider.yaw)).multiplyScalar(2 * (1 - e) + 0.01);
+  rider.vel.set(Math.sin(rider.yaw), 0, -Math.cos(rider.yaw)).multiplyScalar(1 * (1 - e) + 0.01);
   terrain.normalAt(p.x, p.z, rider.normal);
-  rider.brakeAmt = 1 - e;
+  rider.brakeAmt = 0;
   if (glide.t >= 1) {
     glide = null; rider.brakeAmt = 0; rider.vel.set(0, 0, 0);
     chairIdx = curLift.nextChairToLoad().index;
@@ -204,16 +204,24 @@ function endRun(l) {
 
 // Near the base: which lift is closest, how far, and which way (relative to the camera).
 const liftGuideEl = document.getElementById('lift-guide');
+let inLane = null;
+// where the lift line starts (between the ropes, at the back of the line)
+function laneEntrance(l) { return l.bottom.clone().addScaledVector(l.f, l.lane.d0 - 3).addScaledVector(l.p, (l.lane.l0 + l.lane.l1) / 2); }
 function updateLiftGuide() {
   if (rider.pos.z > BASE_Z + 160) { liftGuideEl.classList.add('hidden'); return; }
-  let best = null, bd = Infinity;
-  for (const l of lifts) { const d = Math.hypot(l.loadPoint.x - rider.pos.x, l.loadPoint.z - rider.pos.z); if (d < bd) { bd = d; best = l; } }
+  if (inLane) {
+    liftGuideEl.innerHTML = `🚡 ${inLane.name}<br><small>Ride up to the blue line and wait for the chair</small>`;
+    liftGuideEl.classList.remove('hidden');
+    return;
+  }
+  let best = null, bd = Infinity, target = null;
+  for (const l of lifts) { const e = laneEntrance(l); const d = Math.hypot(e.x - rider.pos.x, e.z - rider.pos.z); if (d < bd) { bd = d; best = l; target = e; } }
   const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
-  const toL = new THREE.Vector3(best.loadPoint.x - rider.pos.x, 0, best.loadPoint.z - rider.pos.z);
+  const toL = new THREE.Vector3(target.x - rider.pos.x, 0, target.z - rider.pos.z);
   const ang = Math.atan2(fwd.x * toL.z - fwd.z * toL.x, fwd.x * toL.x + fwd.z * toL.z);   // + = to the right
   const arrows = ['⬆', '↗', '➡', '↘', '⬇', '↙', '⬅', '↖'];
   const k = ((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8;
-  liftGuideEl.innerHTML = `<span class="arrow">${arrows[k]}</span> 🚡 ${best.name} · ${Math.round(bd)} m<br><small>Ride into the lift line to head back up</small>`;
+  liftGuideEl.innerHTML = `<span class="arrow">${arrows[k]}</span> 🚡 ${best.name} · ${Math.round(bd)} m<br><small>Ride into the lift line (between the orange ropes)</small>`;
   liftGuideEl.classList.remove('hidden');
 }
 
@@ -336,7 +344,8 @@ document.getElementById('btn-start').onclick = () => startRun();
 
 function handleEvents() {
   for (const ev of rider.events) {
-    if (ev.type === 'takeoff') { tricks.begin(); recorder.onTakeoff(); }
+    if (ev.type === 'takeoff') { if (!ev.fromGrind || !tricks.active) { tricks.begin(); recorder.onTakeoff(); } }
+    else if (ev.type === 'grind-start') { if (!tricks.active) { tricks.begin(); recorder.onTakeoff(); } }
     else if (ev.type === 'land') {
       const res = tricks.finish(true, rider.airTime);
       if (res && res.points > 0) {
@@ -353,17 +362,7 @@ function handleEvents() {
       hud.popup(`${ev.reason}${res ? `<span class="pts">lost: ${res.name}</span>` : ''}`, 0, true);
       chase.shake = 0.8;
       emit(50, rider.pos, rider.vel, 4);
-    } else if (ev.type === 'respawn') {
-      // put the rider back near the crash spot, nudged toward the middle of the run, facing downhill
-      const ra = terrain.runAt(rider.pos.x, rider.pos.z);
-      let x = rider.pos.x, z = rider.pos.z - 3, yaw = 0;
-      if (ra) {
-        const c = ra.run.at(ra.s + 4), ahead = ra.run.at(ra.s + 14);
-        const k = ra.d > ra.run.hw * 0.6 ? 0.6 : 0.15;           // move back toward the middle of the run
-        x = rider.pos.x + (c.x - rider.pos.x) * k; z = rider.pos.z + (c.z - rider.pos.z) * k;
-        yaw = Math.atan2(ahead.x - c.x, -(ahead.z - c.z));
-      }
-      rider.reset(new THREE.Vector3(x, terrain.heightAt(x, z), z), yaw);
+    } else if (ev.type === 'recovered') {
       hud.clearPopups();
     } else {
       tricks.handle(ev);
@@ -430,7 +429,7 @@ function tick(dt, now) {
       const n = Math.round(rider.spray * 4);
       emit(n, rider.pos, rider.vel, 1.5 + rider.spray * 2);
     }
-    hud.update({ score: game.score, time: game.time, speed: rider.state === 'crash' ? 0 : rider.speed, live: rider.state === 'air' ? tricks.liveName() : '' });
+    hud.update({ score: game.score, time: game.time, speed: rider.state === 'crash' ? 0 : rider.speed, live: rider.state === 'air' || rider.state === 'grind' ? tricks.liveName() : '' });
 
     // which run are we on? (for the HUD and the run summary)
     const ra = terrain.runAt(rider.pos.x, rider.pos.z);
@@ -442,15 +441,20 @@ function tick(dt, now) {
       game.runsVisited[game.runsVisited.length - 1].t += dt;
     }
 
-    // ride into a lift line to end the run and head back up
+    // lift line: ride in between the ropes, slowly up to the blue line, and the chair picks you up
+    inLane = null;
     if (rider.state === 'ride') {
       for (const l of lifts) {
-        const dl = Math.hypot(rider.pos.x - l.loadPoint.x, rider.pos.z - l.loadPoint.z);
-        const ds = Math.hypot(rider.pos.x - l.towers[0].x, rider.pos.z - l.towers[0].z);
-        if (dl < 11 || ds < 9) { endRun(l); break; }
+        const { d, l: across } = l.laneCoords(rider.pos.x, rider.pos.z), L = l.lane;
+        if (across > L.l0 - 0.4 && across < L.l1 + 0.4 && d > L.d0 - 1 && d < L.d1 + 2) {
+          inLane = l;
+          const sp = rider.speed;
+          if (sp > 3) rider.vel.multiplyScalar(Math.max(3, sp - 8 * dt) / sp);   // shuffle along in line
+          if (d >= L.d1 - 1.2) { endRun(l); break; }
+        }
       }
     }
-    updateLiftGuide();
+    if (game.mode === 'run') updateLiftGuide();
   }
 
   else if (game.mode === 'liftwait' || game.mode === 'lift') {

@@ -9,25 +9,38 @@ export const WORLD = { x0: -390, x1: 390, zTop: 90, zBot: -1490 };
 export const SUMMIT = { x: 50, z: 26 };    // top of the mountain / Summit Express
 export const RIDGE_TOP = { x: -300, z: -612 };
 export const EXPRESS_TOP = { x: 86, z: 26 };    // Summit Express top station, right of the summit
-export const BASE_Z = -1370;               // crossing this line = run complete
+export const BASE_Z = -1370;               // top of the base area
+export const LIFT_BOTTOMS = { express: { x: 140, z: -1404 }, ridge: { x: -262, z: -1404 } };
 
 const GROOM_FADE = 18;                     // m from a run's edge to untouched snow
+// jump sizes: [lip angle vs slope, length, width]
+const JUMP = { S: [0.4, 6, 5], M: [0.5, 8, 6], L: [0.6, 10, 7], XL: [0.68, 12, 8] };
 const KICKERS = [
   // [run id, at world z, offset from center, lip angle vs slope, length, width]
-  ['main', -365, -6, 0.45, 8, 7],
-  ['main', -545, 6, 0.5, 9, 8],
-  ['main', -615, -7, 0.55, 10, 8],
-  ['main', -685, 5, 0.6, 11, 9],
+  ['main', -545, 8, 0.5, 9, 8],
   ['long', -300, 0, 0.4, 7, 6],
   ['cross', -420, 0, 0.5, 9, 7],
   ['timber', -980, 0, 0.5, 9, 7],
   ['ridge', -1050, 0, 0.55, 10, 8],
 ];
+// The Yard: three jump lines (small / medium / large side by side) and rails & boxes in between
+const PARK = {
+  run: 'park',
+  jumps: [[70, [['S', -15], ['M', 0], ['L', 15]]], [200, [['S', -15], ['M', 0], ['L', 15]]], [325, [['M', -15], ['L', 0], ['XL', 15]]]],
+  rails: [
+    // [s, offset, length, kind, height at start]
+    [135, -13, 12, 'rail', 0.3], [135, 0, 9, 'box', 0.25], [135, 13, 14, 'rail', 0.3],
+    [262, -12, 16, 'rail', 0.3], [262, 12, 10, 'box', 0.25],
+    [385, 0, 14, 'box', 0.25],
+  ],
+};
 const CLIFF = { run: 'chute', z: -560, drop: 7 };
 const PADS = [
   { x: SUMMIT.x, z: SUMMIT.z - 6, r: 34 },     // summit flat (lift top, start of runs)
   { x: RIDGE_TOP.x, z: RIDGE_TOP.z, r: 22 },  // ridge lift top
   { x: EXPRESS_TOP.x, z: EXPRESS_TOP.z - 4, r: 14 },
+  { x: LIFT_BOTTOMS.express.x - 4, z: LIFT_BOTTOMS.express.z - 10, r: 30 },   // flat lift-line areas at the base
+  { x: LIFT_BOTTOMS.ridge.x - 4, z: LIFT_BOTTOMS.ridge.z - 10, r: 30 },
 ];
 
 export class Terrain {
@@ -40,11 +53,13 @@ export class Terrain {
     this.runs = makeRuns();
     this.runById = Object.fromEntries(this.runs.map(r => [r.id, r]));
     this.kickers = [];
+    this.rails = [];
     this.trees = [];
     this._buildElevationTable();
     this._buildHeights();
     this._buildMesh();
     this._buildKickers();
+    this._buildPark();
     this._buildTrees();
     this._buildRocks();
     this._buildSigns();
@@ -99,8 +114,8 @@ export class Terrain {
     const warp = 1.8 * fbm(x / 300, z / 300, 2);
     h += 5.5 * Math.sin(x / 52 + warp) * smoothstep(-50, 150, s) * (1 - smoothstep(1250, 1380, s));
     h += 15 * fbm(x / 260 + 3.1, z / 260, 3);
-    h += 2.4 * fbm(x / 42, z / 42, 3);
-    h += 0.5 * fbm(x / 9, z / 9, 2);
+    h += 1.3 * fbm(x / 42, z / 42, 3);
+    h += 0.2 * fbm(x / 9, z / 9, 2);
     // past the lifts the base area turns uphill so you roll to a stop instead of leaving the mountain
     if (z < BASE_Z - 75) { const e = BASE_Z - 75 - z; h += 0.25 * e + 0.012 * e * e; }
     return h;
@@ -125,7 +140,7 @@ export class Terrain {
         }
       };
       const tmp = new Float32Array(n);
-      smooth(base, tmp, 30); smooth(tmp, run.prof, 30);
+      smooth(base, tmp, 35); smooth(tmp, run.prof, 35); smooth(run.prof, tmp, 35); run.prof.set(tmp);
       const minSlope = DIFF[run.diff].minSlope;
       for (let i = 1; i < n; i++) {
         const nearEnd = (n - i) * RUN_STEP < 120 || run.zs[i] < BASE_Z + 30;
@@ -165,7 +180,7 @@ export class Terrain {
         const d = this.runDist[ri][q];
         edge = Math.min(edge, d - run.hw);
         if (d > run.hw + GROOM_FADE) return;
-        const w = 1 - smoothstep(run.hw, run.hw + GROOM_FADE, d);
+        const w = 1 - smoothstep(run.hw + 4, run.hw + GROOM_FADE, d);
         sumW += w; sumWP += w * run.profileAt(this.runS[ri][q]); maxW = Math.max(maxW, w);
       });
       let h = raw[q];
@@ -177,10 +192,34 @@ export class Terrain {
       }
       this.H[q] = h; this.groom[q] = maxW; this.edgeDist[q] = edge;
     }
+    // blur the groomed snow a little so crossings and run edges are smooth (2 passes, 3-cell box)
+    const chute = this.runById[CLIFF.run], ci = this.runs.indexOf(chute);
+    for (let pass = 0; pass < 2; pass++) {
+      const src = Float32Array.from(this.H), R = 2;
+      for (let j = R; j <= rows - R; j++) for (let i = R; i <= cols - R; i++) {
+        const q = j * W + i, g = this.groom[q];
+        if (g <= 0) continue;
+        if (this.runDist[ci][q] < chute.hw + 20 && Math.abs(this.runS[ci][q] - chute.cliffS) < 14) continue;   // keep the cliff a cliff
+        let sum = 0;
+        for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) sum += src[q + b * W + a];
+        this.H[q] = src[q] + (sum / ((2 * R + 1) ** 2) - src[q]) * g;
+      }
+    }
   }
 
-  // Height of the rendered terrain (exact triangle interpolation).
+  // Smooth ground height for riding (Catmull-Rom across the grid, so no bumps at triangle edges).
   terrainHeight(x, z) {
+    const gx = (x - this.x0) / CELL, gz = (this.z0 - z) / CELL;
+    const i = Math.max(1, Math.min(this.cols - 2, Math.floor(gx))), j = Math.max(1, Math.min(this.rows - 2, Math.floor(gz)));
+    const fx = Math.min(1, Math.max(0, gx - i)), fz = Math.min(1, Math.max(0, gz - j));
+    const W = this.cols + 1, H = this.H;
+    const cr = (p0, p1, p2, p3, t) => p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
+    const row = (jj) => { const o = jj * W + i; return cr(H[o - 1], H[o], H[o + 1], H[o + 2], fx); };
+    return cr(row(j - 1), row(j), row(j + 1), row(j + 2), fz);
+  }
+
+  // Height of the rendered terrain mesh (exact triangle interpolation).
+  meshHeight(x, z) {
     const gx = (x - this.x0) / CELL, gz = (this.z0 - z) / CELL;
     let i = Math.floor(gx), j = Math.floor(gz);
     i = Math.max(0, Math.min(this.cols - 1, i)); j = Math.max(0, Math.min(this.rows - 1, j));
@@ -328,9 +367,12 @@ export class Terrain {
   _buildKickers() {
     const mat = new THREE.MeshStandardMaterial({ color: 0xeef4fb, roughness: 0.8, side: THREE.DoubleSide, normalMap: this.material.normalMap, normalScale: new THREE.Vector2(0.4, 0.4) });
     const lipMat = new THREE.MeshStandardMaterial({ color: 0x2a64c8, roughness: 0.6 });
-    for (const [rid, zAt, off, lipAngle, len, w] of KICKERS) {
+    const list = KICKERS.map(([rid, zAt, off, lip, len, w]) => [rid, this.runById[rid].sAtZ(zAt), off, lip, len, w]);
+    for (const [s, line] of PARK.jumps) for (const [size, off] of line) list.push([PARK.run, s, off, ...JUMP[size]]);
+    this.parkMat = { mat, lipMat };
+    for (const [rid, sAt, off, lipAngle, len, w] of list) {
       const run = this.runById[rid];
-      const a = run.at(run.sAtZ(zAt));
+      const a = run.at(sAt);
       const height = lipAngle * len / 1.65;
       const dx = a.tx, dz = a.tz;
       const k = { x: a.x - dz * off, z: a.z + dx * off, dx, dz, px: -dz, pz: dx, len, w, height, run: rid };
@@ -343,6 +385,68 @@ export class Terrain {
       this.kickers.push(k);
       this.scene.add(this._kickerMesh(k, prof, N, mat, lipMat));
     }
+  }
+
+  // Rails and boxes in the park, plus the entrance banner.
+  _buildPark() {
+    const run = this.runById[PARK.run];
+    const metal = new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 0.8, roughness: 0.3 });
+    const post = new THREE.MeshStandardMaterial({ color: 0x3a3f48, roughness: 0.6 });
+    const boxTop = new THREE.MeshStandardMaterial({ color: 0xffd23a, roughness: 0.5 });
+    const boxSide = new THREE.MeshStandardMaterial({ color: 0x23272e, roughness: 0.7 });
+    for (const [sAt, off, len, kind, h0] of PARK.rails) {
+      const a = run.at(sAt), b = run.at(sAt + len);
+      const px = -a.tz, pz = a.tx;
+      const x0 = a.x + px * off, z0 = a.z + pz * off, x1 = b.x + px * off, z1 = b.z + pz * off;
+      const g0 = this.terrainHeight(x0, z0), g1 = this.terrainHeight(x1, z1);
+      // the rail drops more gently than the slope, so it gets higher toward the end (a down rail)
+      const p0 = new THREE.Vector3(x0, g0 + h0, z0);
+      const p1 = new THREE.Vector3(x1, Math.max(g1 + h0, g0 + h0 - (g0 - g1) * 0.85), z1);
+      const d = p1.clone().sub(p0), L = d.length(), dir3 = d.clone().normalize();
+      const dirH = new THREE.Vector3(d.x, 0, d.z); const lenH = dirH.length(); dirH.normalize();
+      const r = { p0, p1, dir3, dirH, len: L, lenH, kind, halfW: kind === 'box' ? 0.3 : 0.06, top: kind === 'box' ? 0.06 : 0.05 };
+      this.rails.push(r);
+      const mid = p0.clone().lerp(p1, 0.5);
+      const yaw = Math.atan2(dir3.x, dir3.z), pitch = -Math.asin(dir3.y);
+      const g = new THREE.Group();
+      if (kind === 'rail') {
+        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, L, 8), metal);
+        bar.rotation.x = Math.PI / 2; g.add(bar);
+        g.position.copy(mid); g.rotation.set(0, yaw, 0, 'YXZ'); g.rotateX(pitch);
+        this.scene.add(g);
+        for (let t = 0.08; t <= 0.95; t += 0.29) {          // support posts
+          const q = p0.clone().lerp(p1, t), gy = this.terrainHeight(q.x, q.z);
+          const pst = new THREE.Mesh(new THREE.BoxGeometry(0.08, q.y - gy + 0.2, 0.08), post);
+          pst.position.set(q.x, (q.y + gy - 0.2) / 2, q.z); pst.castShadow = true; this.scene.add(pst);
+        }
+        bar.castShadow = true;
+      } else {
+        const top = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.06, L), boxTop); top.position.y = 0.03; g.add(top);
+        const hMid = mid.y - this.terrainHeight(mid.x, mid.z);
+        const side = new THREE.Mesh(new THREE.BoxGeometry(0.56, hMid + 0.6, L), boxSide); side.position.y = -(hMid + 0.6) / 2; g.add(side);
+        g.position.copy(mid); g.rotation.set(0, yaw, 0, 'YXZ'); g.rotateX(pitch);
+        g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+        this.scene.add(g);
+      }
+    }
+    // entrance banner across the top of the park
+    const a = run.at(28), px = -a.tz, pz = a.tx, hw = run.hw - 4;
+    const c = document.createElement('canvas'); c.width = 1024; c.height = 96;
+    const gx = c.getContext('2d');
+    gx.fillStyle = '#ff7a1a'; gx.fillRect(0, 0, 1024, 96);
+    gx.fillStyle = '#fff'; gx.font = 'bold 60px Trebuchet MS, sans-serif'; gx.textAlign = 'center'; gx.textBaseline = 'middle';
+    gx.fillText('THE YARD · TERRAIN PARK', 512, 52);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    let topY = -Infinity;
+    for (const sgn of [-1, 1]) {
+      const x = a.x + px * hw * sgn, z = a.z + pz * hw * sgn, y = this.terrainHeight(x, z);
+      topY = Math.max(topY, y + 7);
+      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.5, 8, 0.5), post);
+      pole.position.set(x, y + 4, z); pole.castShadow = true; this.scene.add(pole);
+    }
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(hw * 2, 2, 0.2), new THREE.MeshStandardMaterial({ map: tex }));
+    banner.position.set(a.x, topY, a.z); banner.rotation.y = Math.atan2(px, pz) - Math.PI / 2;
+    this.scene.add(banner);
   }
 
   _kickerMesh(k, prof, N, mat, lipMat) {
@@ -407,7 +511,7 @@ export class Terrain {
   }
 
   _buildTrees() {
-    const r = rng(42), sp = this.opts.treeSpacing || 7;
+    const r = rng(42), sp = this.opts.treeSpacing || 9.5;
     const byChunk = new Map();
     const lifts = this.opts.liftLines || [];
     for (let z = WORLD.zTop - 2; z > WORLD.zBot + 2; z -= sp) for (let x = WORLD.x0 + 2; x < WORLD.x1 - 2; x += sp) {
@@ -422,6 +526,7 @@ export class Terrain {
       if (this.slopeAt(tx, tz) > 1.0) continue;
       if (PADS.some(p => Math.hypot(tx - p.x, tz - p.z) < p.r + 8)) continue;
       if (this.kickers.some(k => Math.hypot(tx - k.x, tz - k.z) < k.len + 8)) continue;
+      if (this.rails.some(rl => distToSeg(tx, tz, rl.p0, rl.p1) < 6)) continue;
       if (lifts.some(([a, b]) => distToSeg(tx, tz, a, b) < 8)) continue;
       const size = 0.75 + r() * 0.55 + 0.25 * smoothstep(300, 1200, s);
       const key = `${Math.floor((tx - this.x0) / 192)},${Math.floor((this.z0 - tz) / 192)}`;
@@ -442,7 +547,7 @@ export class Terrain {
         m.compose(p.set(x, y, z), q, sc); im.setMatrixAt(i, m);
         tint.setHSL(0.33, 0.1 + shade * 0.2, 0.85 + shade * 0.3);
         im.setColorAt(i, tint);
-        this.trees.push({ x, z, y, r: 0.42 * size, h: 6.5 * size, kind: 'tree', mesh: im, i });
+        this.trees.push({ x, z, y, r: 0.3 * size, h: 6.5 * size, kind: 'tree', mesh: im, i });
       });
       im.castShadow = true; im.receiveShadow = true;
       im.computeBoundingSphere();
@@ -483,7 +588,7 @@ export class Terrain {
     for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
       const list = this.treeGrid.get(`${bx + a},${bz + b}`);
       if (!list) continue;
-      for (const t of list) if (Math.hypot(t.x - x, t.z - z) < t.r + 0.35) return t;
+      for (const t of list) if (Math.hypot(t.x - x, t.z - z) < t.r + 0.2) return t;
     }
     return null;
   }

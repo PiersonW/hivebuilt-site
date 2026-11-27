@@ -2,10 +2,10 @@
 import * as THREE from 'three';
 
 export const REC_HZ = 30;
-const F = 16;               // floats per frame
+const F = 17;               // floats per frame
 const RING = REC_HZ * 240;  // 4 minutes
 const GRABS = [null, 'Indy', 'Melon', 'Method', 'Nose Grab'];
-const STATES = ['ride', 'air', 'crash'];
+const STATES = ['ride', 'air', 'crash', 'grind'];
 const PRE = 1.2, POST = 1.2; // seconds kept before takeoff and after landing
 
 export class Recorder {
@@ -35,6 +35,7 @@ export class Recorder {
       b[o + 11] = Math.max(0, STATES.indexOf(rider.state));
       b[o + 12] = rider.switch ? 1 : 0; b[o + 13] = rider.brakeAmt; b[o + 14] = rider.regular ? 1 : 0;
       b[o + 15] = rider.speed;
+      b[o + 16] = rider.boardslide || 0;
       this.count++;
       this._finishPending(false);
     }
@@ -121,7 +122,7 @@ export class Replayer {
     g.state = STATES[fr[near + 11]] || 'ride';
     g.grab = GRABS[fr[near + 9]] || null;
     g.phantomT = fr[A + 10] >= 0 && fr[B + 10] >= 0 ? lerp(10) : fr[near + 10];
-    g.switch = fr[near + 12] === 1; g.brakeAmt = lerp(13);
+    g.switch = fr[near + 12] === 1; g.brakeAmt = lerp(13); g.boardslide = fr[near + 16];
     g._updatePose(Math.max(dt, 1 / 240), {});
   }
 
