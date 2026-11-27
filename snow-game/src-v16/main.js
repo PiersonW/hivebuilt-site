@@ -15,6 +15,8 @@ import { Npcs } from './npcs.js';
 import { Helicopter } from './heli.js';
 import { Achievements } from './achievements.js';
 import { Race, fmtRace } from './race.js';
+import { LongJump } from './longjump.js';
+import { LONG_JUMP } from './terrain.js';
 import { YETI, PIPE } from './terrain.js';
 import { SKI_GRABS } from './rider.js';
 
@@ -66,6 +68,7 @@ document.getElementById('map-wrap').appendChild(trailMap.canvas);
 const rider = new Rider(scene, terrain);
 const heli = new Helicopter(scene);
 const race = new Race(scene, terrain);
+const longJump = new LongJump(terrain);
 const ach = new Achievements(document.getElementById('ach-toast'));
 // other skiers and snowboarders, on the runs and on the chairs
 const npcs = new Npcs(scene, terrain, {
@@ -168,7 +171,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
+window.__game = { longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -261,6 +264,34 @@ function updateHeliMode(dt, inp) {
   }
 }
 
+// ---------- look around (Shift + arrows when stopped or under the parachute) ----------
+const freeLook = { on: false, blend: 0, yaw: 0, pitch: 0.3 };
+function updateFreeLook(dt, inp, looking) {
+  if (looking && !freeLook.on) {
+    // start from where the camera is now
+    const d = camera.position.clone().sub(rider.pos);
+    freeLook.yaw = Math.atan2(d.x, d.z);
+    freeLook.pitch = Math.max(0.05, Math.min(1.2, Math.atan2(d.y, Math.hypot(d.x, d.z))));
+  }
+  freeLook.on = looking;
+  freeLook.blend = Math.max(0, Math.min(1, freeLook.blend + (looking ? dt / 0.35 : -dt / 0.45)));
+  if (!looking) return;
+  const lx = (inp.steer || 0) + (inp.lookX || 0), ly = (inp.up ? 1 : 0) - (inp.down ? 1 : 0) - (inp.lookY || 0);
+  freeLook.yaw -= lx * 1.7 * dt + (inp.mouseX || 0) * 0.005;
+  freeLook.pitch = Math.max(-0.15, Math.min(1.3, freeLook.pitch + ly * 1.2 * dt + (inp.mouseY || 0) * 0.004));
+}
+function applyFreeLook(dt) {
+  if (freeLook.blend <= 0) return;
+  const D = rider.state === 'fly' ? 11 : 7.5, t = rider.pos.clone(); t.y += 1;
+  const cp = t.clone().add(new THREE.Vector3(Math.sin(freeLook.yaw) * Math.cos(freeLook.pitch), Math.sin(freeLook.pitch), Math.cos(freeLook.yaw) * Math.cos(freeLook.pitch)).multiplyScalar(D));
+  cp.y = Math.max(cp.y, terrain.heightAt(cp.x, cp.z) + 1);
+  const chasePos = camera.position.clone(), chaseQ = camera.quaternion.clone();
+  camera.position.copy(cp); camera.lookAt(t);
+  const e = freeLook.blend * freeLook.blend * (3 - 2 * freeLook.blend);
+  camera.position.lerpVectors(chasePos, cp, e);
+  camera.quaternion.slerpQuaternions(chaseQ, camera.quaternion.clone(), e);
+}
+
 // ---------- racing ----------
 const raceHudEl = document.getElementById('race-hud'), raceResultEl = document.getElementById('race-result');
 const nameEl = document.getElementById('racer-name');
@@ -293,6 +324,31 @@ function updateRace(dt) {
     raceHudEl.classList.remove('hidden');
   } else raceHudEl.classList.add('hidden');
   if (raceResultT > 0) { raceResultT -= dt; if (raceResultT <= 0) raceResultEl.classList.add('hidden'); }
+}
+
+// ---------- long jump ----------
+function showJumpResult(r) {
+  if (r.dist === null) { hud.popup('Long jump: landed off the hill, no distance', 0, true); return; }
+  const head = r.record && r.prevHill !== null ? `🏆 New hill record! (was ${r.prevHill.toFixed(1)} m)`
+    : r.pb ? (r.prevMine === null ? 'Your first mark on the board!' : `New personal best! (was ${r.prevMine.toFixed(1)} m)`)
+    : `Your best: ${longJump.bestFor(racerName()).toFixed(1)} m`;
+  raceResultEl.innerHTML = `<h2>🎿 ${r.dist.toFixed(1)} m</h2><div class="${r.pb ? 'pr' : ''}">${head}</div>` +
+    `<div class="muted">K-point ${LONG_JUMP.K} m · takeoff ${Math.round(longJump.takeoffSpeed * 2.237)} mph</div>` +
+    `<div class="panel-title" style="margin-top:10px">Longest jumps on this device</div>${longJump.boardHtml(r.dist)}`;
+  raceResultEl.classList.remove('hidden'); raceResultT = 8;
+  ach.unlock('jump_land');
+  if (r.dist >= LONG_JUMP.K) ach.unlock('jump_k');
+  if (r.dist >= 120) ach.unlock('jump_far');
+}
+// on the inrun: show the hill record and your best
+function updateJumpHud() {
+  if (race.state === 'running') return;
+  const w = rider.state === 'ride' ? terrain.jumpWeight(rider.pos.x, rider.pos.z) : null;
+  if (w && w.k > 0.5 && w.u < LONG_JUMP.edgeU) {
+    const mine = longJump.bestFor(racerName()), rec = longJump.best;
+    raceHudEl.innerHTML = `🎿 LONG JUMP · ${Math.round(rider.speed * 2.237)} mph<small>${rec !== null ? `Hill record ${rec.toFixed(1)} m` : 'No record yet'}${mine !== null ? ` · your best ${mine.toFixed(1)} m` : ''}</small><small>tuck, then jump at the blue lip</small>`;
+    raceHudEl.classList.remove('hidden');
+  } else if (race.state !== 'running') raceHudEl.classList.add('hidden');
 }
 
 // ---------- achievements ----------
@@ -501,7 +557,7 @@ function updateLiftGuide() {
     const above = Math.max(0, rider.pos.y - terrain.heightAt(rider.pos.x, rider.pos.z));
     const ft = Math.round(above * 3.281);
     liftGuideEl.innerHTML = rider.chute
-      ? `🪂 Parachute open · ${ft} ft<br><small>← → steer · you'll touch down and ride away</small>`
+      ? `🪂 Parachute open · ${ft} ft<br><small>← → steer · hold Shift + arrows to look around · you'll touch down and ride away</small>`
       : `🦅 Wingsuit · ${ft} ft above the snow<br><small>↓ dive · ↑ flare · ← → turn · Space / A opens the parachute (it opens by itself at 50 ft)</small>`;
     liftGuideEl.classList.remove('hidden');
     return;
@@ -686,7 +742,7 @@ document.getElementById('ach-close').onclick = () => toggleAch(false);
 
 function handleEvents() {
   for (const ev of rider.events) {
-    if (ev.type === 'takeoff') { if (!ev.fromGrind || !tricks.active) { tricks.begin(); recorder.onTakeoff(); } onTakeoffAch(); }
+    if (ev.type === 'takeoff') { if (!ev.fromGrind || !tricks.active) { tricks.begin(); recorder.onTakeoff(); } onTakeoffAch(); longJump.takeoff(rider.pos, rider.speed); }
     else if (ev.type === 'fly-land') {
       hud.popup('Wingsuit landing!', 0);
       ach.unlock('wingsuit');
@@ -700,6 +756,8 @@ function handleEvents() {
       const parts = tricks.active ? tricks.parts() : [];
       const res = tricks.finish(true, rider.airTime);
       onLandAch(res, parts, rider.airTime);
+      const lj = longJump.land(rider.pos, racerName(), game.sport);
+      if (lj) showJumpResult(lj);
       if (res && res.points > 0) {
         game.score += res.points;
         game.tricksLanded++;
@@ -712,6 +770,7 @@ function handleEvents() {
     } else if (ev.type === 'crash') {
       const res = tricks.finish(false, rider.airTime);
       if (/tree/i.test(ev.reason)) ach.addCount('trees', 1);
+      if (longJump.armed) { longJump.crashed(); hud.popup('Fell on the long jump: no distance', 0, true); }
       airCtx = null;
       game.crashes++;
       hud.popup(`${ev.reason}${res ? `<span class="pts">lost: ${res.name}</span>` : ''}`, 0, true);
@@ -783,9 +842,15 @@ function tick(dt, now) {
     else if (inp.menuPressed) showMenu();
     if (inp.pausePressed) game.paused = !game.paused;
     acc += game.paused ? 0 : dt;
+    // look around: hold Shift (LT) when you're stopped, or while floating under the parachute,
+    // and the arrows (left stick) swing the camera instead of moving you
+    const canLook = (rider.state === 'ride' && rider.speed < (freeLook.on ? 4 : 2)) || (rider.state === 'fly' && rider.chute);
+    const looking = !!inp.brake && canLook;
+    const stepInp = looking ? { ...inp, steer: 0, up: false, down: false, jump: false } : inp;
+    updateFreeLook(dt, inp, looking);
     while (acc >= STEP) {
       prevPos.copy(rider.pos);
-      rider.step(STEP, inp);
+      rider.step(STEP, stepInp);
       acc -= STEP;
     }
     handleEvents();
@@ -798,6 +863,7 @@ function tick(dt, now) {
     rider.updateVisual(dt, inp);
     if (!game.paused) recorder.record(dt, rider);
     chase.update(dt, rider);
+    applyFreeLook(dt);
     rider.pos.copy(realPos);
     if (runCamBlend) {
       // ease the camera from the chair view to behind you
@@ -846,11 +912,12 @@ function tick(dt, now) {
     if (game.mode === 'run') updateLiftGuide();
     if (game.mode === 'run') trackAch(dt);
     if (game.mode === 'run') updateRace(dt);
+    if (game.mode === 'run') updateJumpHud();
     // stopped on a flat: remind how to push along
     const slow = game.mode === 'run' && rider.state === 'ride' && rider.speed < 1.2 && !inLane && rider.pushAmt < 0.2;
     pushHint.t = slow ? pushHint.t + dt : 0;
     const showHint = pushHint.t > 1.2;
-    if (showHint) pushHintEl.textContent = input.padName ? 'Push the left stick up to push yourself along' : 'Hold ↑ to push yourself along';
+    if (showHint) pushHintEl.textContent = input.padName ? 'Left stick up to push along · hold LT + left stick to look around' : 'Hold ↑ to push along · hold Shift + arrows to look around';
     pushHintEl.classList.toggle('hidden', !showHint);
   }
 

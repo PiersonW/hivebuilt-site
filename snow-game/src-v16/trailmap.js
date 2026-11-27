@@ -89,6 +89,13 @@ export class TrailMap {
       const [mx, my] = this.toMap(P.ox + P.ax * P.L / 2 + P.cx * 22, P.oz + P.az * P.L / 2 + P.cz * 22);
       this._label(g, 'HALFPIPE', mx, my, '#163566', 'center', 10);
     }
+    if (mk.jump) {
+      const [[ax, az], [bx, bz], [ex, ez]] = mk.jump;
+      const [x1, y1] = this.toMap(ax, az), [x2, y2] = this.toMap(bx, bz), [x3, y3] = this.toMap(ex, ez);
+      g.strokeStyle = '#d8262b'; g.lineWidth = 4; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+      g.fillStyle = '#d8262b'; g.beginPath(); g.arc(x3, y3, 4, 0, Math.PI * 2); g.fill();
+      this._label(g, 'LONG JUMP', x3 + 8, y3, '#d8262b', 'left', 11);
+    }
     // lifts
     for (const lift of this.lifts) {
       const [ax, ay] = this.toMap(lift.bottom.x, lift.bottom.z), [bx, by] = this.toMap(lift.top.x, lift.top.z);

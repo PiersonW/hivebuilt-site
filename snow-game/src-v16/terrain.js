@@ -82,9 +82,12 @@ const SNOW_ROCKS = [
   [-150, -1060, 3, 1.6], [-145, -1215, 2.8, 1.5],
   [-245, -960, 3, 1.7], [-250, -1130, 3, 1.6],
   // boulders in the backside bowl
-  [-100, 180, 3, 1.8], [-20, 240, 3.2, 1.9], [65, 165, 2.8, 1.6], [120, 260, 3, 1.8], [205, 205, 3, 1.7],
+  [-100, 180, 3, 1.8], [-20, 240, 3.2, 1.9], [65, 165, 2.8, 1.6], [120, 260, 3, 1.8], [-170, 230, 3, 1.7],
   [-55, 395, 3.2, 1.9], [-10, 320, 2.8, 1.6], [150, 400, 3, 1.8], [90, 450, 3, 1.6], [-140, 300, 3, 1.8],
 ];
+// The long jump: a ski-jump hill on the right side of the backside bowl (opposite the park).
+// Inrun from the top, a takeoff table, a steep landing hill marked in metres, and an outrun.
+export const LONG_JUMP = { a: [232, 45], b: [214, 400], edgeU: 118, K: 100 };
 // A hidden yeti (way out on the right-hand valley wall; easiest to reach from the air)
 export const YETI = { x: 362, z: -560 };
 // a line segment's frame: along (ex, ez), downhill-side normal (nx, nz), length
@@ -152,6 +155,7 @@ export class Terrain {
     this._buildKickers();
     this._buildPark();
     this._buildFeatures();
+    this._buildJumpMesh();
     this._buildLogs();
     this._buildYeti();
     this._buildTrees();
@@ -278,6 +282,8 @@ export class Terrain {
     if (this.pipe) { const P = this.pipe, dx = x - P.ox, dz = z - P.oz, u = dx * P.ax + dz * P.az, l = dx * P.cx + dz * P.cz;
       if (u > -8 - margin && u < P.L + 8 + margin && Math.abs(l) < PIPE.outer + 3 + margin) return true; }
     for (const b of this.snowRocks || []) if (Math.hypot(x - b.x, z - b.z) < b.r * 2.6 + 2 + margin) return true;
+    if (this.jump) { const J = this.jump, dx = x - J.ox, dz = z - J.oz, u = dx * J.ax + dz * J.az, l = dx * J.cx + dz * J.cz;
+      if (u > -10 && u < J.L + 5 && Math.abs(l) < this.jumpHW(Math.max(0, u)) + this.jumpBW(u) + 4 + margin) return true; }
     return false;
   }
 
@@ -380,7 +386,138 @@ export class Terrain {
       }
       run.naturalJumps = (run.naturalJumps || []).concat(s0);
     }
+    this._carveJump();
   }
+
+  // ---------- the long jump ----------
+  _jumpSlope(u) {
+    // slope (drop per metre) along the hill: start platform, inrun, transition to the table, knoll, landing hill, outrun
+    const ss = smoothstep;
+    let k = 0.05 + 0.42 * ss(8, 18, u);                 // inrun ~25 deg
+    k -= 0.32 * ss(92, 110, u);                          // flattening into the table (~8.5 deg)
+    k += 0.25 * ss(118, 120.5, u) + 0.2 * ss(120.5, 130, u);    // over the knoll onto the landing hill (~31 deg)
+    k -= 0.54 * ss(225, 262, u);                         // landing hill eases into the outrun
+    return k;
+  }
+  jumpHW(u) { return u < 118 ? 3.6 : 3.6 + 10.4 * smoothstep(118, 135, u) + 4 * smoothstep(200, 260, u); }
+  jumpBW(u) { return 7 + 16 * smoothstep(110, 150, u); }     // width of the bank that blends the hill into the snow
+
+  _carveJump() {
+    const [ax0, az0] = LONG_JUMP.a, [bx0, bz0] = LONG_JUMP.b;
+    let ax = bx0 - ax0, az = bz0 - az0; const L = Math.hypot(ax, az); ax /= L; az /= L;
+    const J = { ox: ax0, oz: az0, ax, az, cx: -az, cz: ax, L, step: 0.5 };
+    const n = Math.floor(L / J.step) + 1, prof = new Float32Array(n), arc = new Float32Array(n);
+    let y = this.terrainHeight(ax0, az0);
+    const endGround = this.terrainHeight(ax0 + ax * L, az0 + az * L);
+    for (let i = 0; i < n; i++) {
+      const u = i * J.step;
+      prof[i] = y;
+      let k = this._jumpSlope(u);
+      if (u > 268) k = Math.max(0.04, Math.min(0.3, (y - endGround) / Math.max(10, L - u)));   // outrun runs back down to the snow
+      y -= k * J.step;
+      if (i > 0) arc[i] = arc[i - 1] + Math.hypot(J.step, prof[i] - prof[i - 1]);
+    }
+    J.prof = prof; J.arc = arc; J.n = n;
+    this.jump = J;
+    // press the hill into the grid (coarse) so the terrain, shadows and trees agree; the exact shape is in heightAt
+    const W = this.cols + 1;
+    for (let j = 0; j <= this.rows; j++) for (let i = 0; i <= this.cols; i++) {
+      const x = this.x0 + i * CELL, z = this.z0 - j * CELL, w = this.jumpWeight(x, z);
+      if (!w) continue;
+      const q = j * W + i;
+      this.H[q] += (w.h - this.H[q]) * w.k;
+      this.groom[q] = Math.max(this.groom[q], w.k);
+    }
+  }
+
+  _buildJumpMesh() {
+    const J = this.jump, edge = LONG_JUMP.edgeU;
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, normalMap: this.material.normalMap, normalScale: new THREE.Vector2(0.35, 0.35), polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const along = []; for (let u = -6; u <= J.L; u += 0.75) along.push(u);
+    const maxW = this.jumpHW(J.L) + this.jumpBW(J.L) + 1, across = []; for (let l = -maxW; l <= maxW + 0.01; l += 0.75) across.push(l);
+    const pos = [], col = [], uv = [], idx = [];
+    for (const u of along) for (const l of across) {
+      const x = J.ox + J.ax * u + J.cx * l, z = J.oz + J.az * u + J.cz * l;
+      const w = this.jumpWeight(x, z), base = this.meshHeight(x, z) + this.powderDepth(x, z);
+      const k = w ? w.k : 0;
+      pos.push(x, base + ((w ? w.h : base) - base) * k + 0.04 * k, z); uv.push(x / 6, z / 6);
+      // grooved inrun tracks, a blue edge on the takeoff table, everything else white
+      let c = [0.95, 0.965, 0.99];
+      if (u < edge && Math.abs(Math.abs(l) - 1.0) < 0.22) c = [0.62, 0.72, 0.9];
+      if (u > edge - 0.8 && u < edge) c = [0.16, 0.39, 0.78];
+      col.push(...c.map(v => v * (0.75 + 0.25 * k)));
+    }
+    const nA = across.length;
+    for (let i = 0; i < along.length - 1; i++) for (let j = 0; j < nA - 1; j++) { const q = i * nA + j; idx.push(q, q + 1, q + nA, q + 1, q + nA + 1, q + nA); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat); mesh.receiveShadow = true; this.scene.add(mesh);
+    // distance lines across the landing hill (measured along the hill from the lip), K-point in red
+    const e0 = this.jumpArc(edge);
+    J.marks = [];
+    for (let d = 50; d <= 150; d += 10) {
+      let lo = edge, hi = J.L;
+      for (let it = 0; it < 30; it++) { const m = (lo + hi) / 2; if (this.jumpArc(m) - e0 < d) lo = m; else hi = m; }
+      const u = lo, hw = this.jumpHW(u), y = this.jumpProfile(u) + 0.08;
+      if (u > J.L - 30) break;
+      J.marks.push({ d, u });
+      const red = d === LONG_JUMP.K;
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(hw * 2, 0.04, red ? 0.5 : 0.3), new THREE.MeshBasicMaterial({ color: red ? 0xd8262b : 0x2a64c8 }));
+      strip.position.set(J.ox + J.ax * u, y, J.oz + J.az * u);
+      strip.rotation.order = 'YXZ'; strip.rotation.y = Math.atan2(J.ax, J.az); strip.rotation.x = Math.atan(this._jumpSlope(u));
+      this.scene.add(strip);
+      for (const sgn of [-1, 1]) {   // number boards at both sides
+        const c = document.createElement('canvas'); c.width = 128; c.height = 64;
+        const g = c.getContext('2d'); g.fillStyle = red ? '#d8262b' : '#163566'; g.fillRect(0, 0, 128, 64);
+        g.fillStyle = '#fff'; g.font = 'bold 44px Trebuchet MS, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(`${d}`, 64, 34);
+        const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+        const bx = J.ox + J.ax * u + J.cx * sgn * (hw + 1.2), bz = J.oz + J.az * u + J.cz * sgn * (hw + 1.2);
+        const board = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.8), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
+        board.position.set(bx, this.heightAt(bx, bz) + 1.0, bz); board.rotation.y = Math.atan2(-J.ax, -J.az);
+        this.scene.add(board);
+      }
+    }
+    // start banner over the inrun
+    const c = document.createElement('canvas'); c.width = 512; c.height = 96;
+    const g = c.getContext('2d'); g.fillStyle = '#d8262b'; g.fillRect(0, 0, 512, 96);
+    g.fillStyle = '#fff'; g.font = 'bold 54px Trebuchet MS, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('LONG JUMP', 256, 52);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const post = new THREE.MeshStandardMaterial({ color: 0x3a3f48 });
+    const u0 = 4, bw = 9, by = this.jumpProfile(u0) + 4.5;
+    for (const sgn of [-1, 1]) {
+      const x = J.ox + J.ax * u0 + J.cx * sgn * bw / 2, z = J.oz + J.az * u0 + J.cz * sgn * bw / 2;
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.3, 5.5, 0.3), post); p.position.set(x, by - 2.2, z); this.scene.add(p);
+    }
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(bw, 1.6, 0.15), new THREE.MeshStandardMaterial({ map: tex }));
+    banner.position.set(J.ox + J.ax * u0, by, J.oz + J.az * u0); banner.rotation.y = Math.atan2(-J.ax, -J.az) + Math.PI; this.scene.add(banner);
+    if (this.mapMarks) this.mapMarks.jump = [[J.ox, J.oz], [J.ox + J.ax * J.L, J.oz + J.az * J.L], [J.ox + J.ax * edge, J.oz + J.az * edge]];
+  }
+
+  jumpProfile(u) {
+    const J = this.jump, f = Math.max(0, Math.min(J.n - 1.001, u / J.step)), i = Math.floor(f), t = f - i;
+    return J.prof[i] + (J.prof[i + 1] - J.prof[i]) * t;
+  }
+  jumpArc(u) {
+    const J = this.jump, f = Math.max(0, Math.min(J.n - 1.001, u / J.step)), i = Math.floor(f), t = f - i;
+    return J.arc[i] + (J.arc[i + 1] - J.arc[i]) * t;
+  }
+  // { u, l, h (hill height), k (0..1 how much the hill replaces the snow) } or null
+  jumpWeight(x, z) {
+    const J = this.jump;
+    if (!J) return null;
+    const dx = x - J.ox, dz = z - J.oz, u = dx * J.ax + dz * J.az;
+    if (u < -6 || u > J.L) return null;
+    const l = dx * J.cx + dz * J.cz, hw = this.jumpHW(Math.max(0, u)), bw = this.jumpBW(u);
+    if (Math.abs(l) > hw + bw) return null;
+    const k = (1 - smoothstep(hw, hw + bw, Math.abs(l))) * smoothstep(-6, 0, u) * (1 - smoothstep(J.L - 25, J.L, u));
+    if (k <= 0) return null;
+    return { u, l, h: this.jumpProfile(Math.max(0, u)), k };
+  }
+  // on the takeoff table (where a launch counts as a long jump)?
+  onJumpTable(x, z) { const w = this.jumpWeight(x, z); return !!(w && w.u > LONG_JUMP.edgeU - 14 && w.u < LONG_JUMP.edgeU + 3 && Math.abs(w.l) < 4.5); }
 
   // Smooth ground height for riding (Catmull-Rom across the grid, so no bumps at triangle edges).
   terrainHeight(x, z) {
@@ -408,6 +545,7 @@ export class Terrain {
   // Ground height including kickers.
   heightAt(x, z) {
     let h = this.terrainHeight(x, z) + this.bumpAt(x, z);
+    if (this.jump) { const w = this.jumpWeight(x, z); if (w) h += (w.h - h) * w.k; }
     for (const k of this.kickers) {
       const dx = x - k.x, dz = z - k.z;
       if (dx * dx + dz * dz > 150) continue;
@@ -765,6 +903,7 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
   _inGullyOrPipe(x, z) {
     if (GULLY_F.some(g => x > g.x0 && x < g.x1 && z > g.z0 && z < g.z1 && gullyDist(g, x, z).d < g.hw - 1)) return true;
     if (this.pipeAt(x, z)) return true;
+    if (this.jumpWeight(x, z)) return true;
     return (this.snowRocks || []).some(b => Math.hypot(x - b.x, z - b.z) < b.r * 2.6);
   }
 

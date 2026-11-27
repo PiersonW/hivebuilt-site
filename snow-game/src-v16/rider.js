@@ -650,7 +650,8 @@ export class Rider {
       // snow-covered rocks are small natural hits: a softer pop than a built kicker
       const rock = this.terrain.snowRockNear && this.terrain.snowRockNear(this.pos.x, this.pos.z);
       const cap = (rock ? 4.8 : TUNE.maxLaunch) + (ollie ? TUNE.jumpBase + TUNE.jumpCharge : 0);
-      if (vn > cap) this.vel.addScaledVector(ln, cap - vn);
+      // (off the long jump's table you keep everything: the landing hill is built for it)
+      if (vn > cap && !(this.terrain.onJumpTable && this.terrain.onJumpTable(this.pos.x, this.pos.z))) this.vel.addScaledVector(ln, cap - vn);
     }
     this.state = 'air';
     this.airTime = 0;
