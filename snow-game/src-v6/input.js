@@ -1,16 +1,17 @@
 // Keyboard + Xbox controller (Gamepad API, standard mapping) merged into one input state.
 
+// Right hand on the arrows (steer, spin, flip); left hand on the letters (tricks).
 const KEYMAP = {
-  left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'],
-  up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'],
+  left: ['ArrowLeft'], right: ['ArrowRight'],
+  up: ['ArrowUp'], down: ['ArrowDown'],
   jump: ['Space'], brake: ['ShiftLeft', 'ShiftRight'],
-  g0: ['KeyJ'], g1: ['KeyK'], g2: ['KeyL'], g3: ['KeyI'],
-  phantom: ['KeyU'],
+  g0: ['KeyA'], g1: ['KeyS'], g2: ['KeyD'], g3: ['KeyF'],
+  phantom: ['KeyW'], grind: ['KeyE'],
   restart: ['KeyR'], menu: ['Escape'], confirm: ['Enter', 'NumpadEnter'], help: ['KeyH'], pause: ['KeyP'],
 };
 
 // Xbox buttons in the standard mapping.
-export const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, VIEW: 8, MENU: 9, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 };
+export const BTN = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, VIEW: 8, MENU: 9, LS: 10, RS: 11, UP: 12, DOWN: 13, LEFT: 14, RIGHT: 15 };
 
 export const GRAB_NAMES = ['Indy', 'Melon', 'Method', 'Nose Grab'];
 
@@ -53,10 +54,10 @@ export class Input {
   poll() {
     const k = (n) => this._key(n);
     let steer = (k('right') ? 1 : 0) - (k('left') ? 1 : 0);
-    let up = k('up'), down = k('down'), jump = k('jump'), brake = k('brake');
+    let up = k('up'), down = k('down'), jump = k('jump'), brake = k('brake'), grind = k('grind');
     const grabsHeld = [k('g0'), k('g1'), k('g2'), k('g3')];
     let pause = k('pause'), phantom = k('phantom'), restart = k('restart'), menu = k('menu'), confirm = k('confirm'), help = k('help');
-    let mLeft = k('left'), mRight = k('right');
+    let mLeft = k('left'), mRight = k('right'), mUp = k('up'), mDown = k('down');
     let lookX = 0, lookY = 0;
     const padTaps = new Set();
 
@@ -81,20 +82,22 @@ export class Input {
       grabsHeld[2] = grabsHeld[2] || b(BTN.LB);
       grabsHeld[3] = grabsHeld[3] || b(BTN.Y);
       phantom = phantom || b(BTN.RB);
+      grind = grind || b(BTN.RS) || b(BTN.LS);
       restart = restart || b(BTN.MENU);
       menu = menu || b(BTN.VIEW);
       confirm = confirm || b(BTN.A);
       mLeft = mLeft || b(BTN.LEFT) || ax < -0.6;
       mRight = mRight || b(BTN.RIGHT) || ax > 0.6;
+      mUp = mUp || b(BTN.UP) || ay < -0.6; mDown = mDown || b(BTN.DOWN) || ay > 0.6;
       lookX = dz(pad.axes[2] || 0); lookY = dz(pad.axes[3] || 0);
       pad.buttons.forEach((_, i) => { if (b(i) && !this.prevPad[i]) padTaps.add(i); this.prevPad[i] = b(i); });
     }
 
     // most recently pressed grab wins; keep it simple: first held in list
     const gi = grabsHeld.findIndex(Boolean);
-    const raw = { pause, phantom, restart, menu, confirm, help, mLeft, mRight };
+    const raw = { pause, phantom, restart, menu, confirm, help, mLeft, mRight, mUp, mDown };
     const pressed = {};
-    const tapName = { pause: 'pause', phantom: 'phantom', restart: 'restart', menu: 'menu', confirm: 'confirm', help: 'help', mLeft: 'left', mRight: 'right' };
+    const tapName = { pause: 'pause', phantom: 'phantom', restart: 'restart', menu: 'menu', confirm: 'confirm', help: 'help', mLeft: 'left', mRight: 'right', mUp: 'up', mDown: 'down' };
     for (const n in raw) { pressed[n] = (raw[n] && !this.prev[n]) || this._tap(tapName[n]); }
     this.prev = raw;
     const taps = new Set(this.tapped);
@@ -103,11 +106,11 @@ export class Input {
     this.mdx = 0; this.mdy = 0;
 
     this.state = {
-      steer, up, down, jump, brake,
+      steer, up, down, jump, brake, grind,
       grab: gi >= 0 ? GRAB_NAMES[gi] : null,
       phantomPressed: pressed.phantom,
       restartPressed: pressed.restart, menuPressed: pressed.menu, confirmPressed: pressed.confirm,
-      helpPressed: pressed.help, pausePressed: pressed.pause, leftPressed: pressed.mLeft, rightPressed: pressed.mRight,
+      helpPressed: pressed.help, pausePressed: pressed.pause, leftPressed: pressed.mLeft, rightPressed: pressed.mRight, upPressed: pressed.mUp, downPressed: pressed.mDown,
       // look around: stick is a rate (-1..1), mouse is pixels moved this frame
       lookX, lookY, mouseX, mouseY,
       taps, padTaps,   // raw key codes / pad button indices pressed this frame (menus, lift)
@@ -117,16 +120,17 @@ export class Input {
 }
 
 export const CONTROLS = [
-  ['Steer / spin', '← → or A D', 'Left stick'],
-  ['Tuck (fast) / back flip', '↓ or S', 'Stick down · RT'],
-  ['Stand up (slow) / front flip', '↑ or W', 'Stick up'],
+  ['Steer / spin', '← →', 'Left stick'],
+  ['Tuck (fast) / back flip', '↓', 'Stick down · RT'],
+  ['Stand up (slow) / front flip', '↑', 'Stick up'],
   ['Jump (hold to charge)', 'Space', 'A'],
   ['Brake / skid', 'Shift', 'LT'],
-  ['Indy grab', 'J', 'X'],
-  ['Melon grab', 'K', 'B'],
-  ['Method grab', 'L', 'LB'],
-  ['Nose grab', 'I', 'Y'],
-  ['Phantom Flip (board off feet)', 'U', 'RB'],
+  ['Grab 1 (Indy / Safety)', 'A', 'X'],
+  ['Grab 2 (Melon / Mute)', 'S', 'B'],
+  ['Grab 3 (Method / Japan)', 'D', 'LB'],
+  ['Grab 4 (Nose / Tail)', 'F', 'Y'],
+  ['Phantom Flip (gear off feet)', 'W', 'RB'],
+  ['Grind: hold near a rail, box or log (+ ← → = boardslide)', 'E', 'Stick click'],
   ['Restart / menu', 'R / Esc', 'Menu / View'],
   ['Pause', 'P', '—'],
 ];

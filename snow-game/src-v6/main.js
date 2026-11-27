@@ -131,7 +131,19 @@ function setStance(regular) {
   document.getElementById('btn-goofy').classList.toggle('on', !regular);
   rider.setStance(regular);
 }
+// snowboarder or skier
+function setSport(sport) {
+  game.sport = sport;
+  document.getElementById('btn-board').classList.toggle('on', sport === 'board');
+  document.getElementById('btn-ski').classList.toggle('on', sport === 'ski');
+  document.getElementById('stance-row').classList.toggle('disabled', sport === 'ski');
+  rider.setSport(sport);
+  try { localStorage.setItem('snowSport', sport); } catch {}
+}
 setStance(true);
+setSport((() => { try { return localStorage.getItem('snowSport') || 'board'; } catch { return 'board'; } })());
+document.getElementById('btn-board').onclick = () => setSport('board');
+document.getElementById('btn-ski').onclick = () => setSport('ski');
 
 // Start a run at the top (or at `at`, e.g. the lift unload point).
 function startRun(at = null, yaw = 0) {
@@ -142,6 +154,7 @@ function startRun(at = null, yaw = 0) {
   rider.events.length = 0;
   tricks.reset();
   recorder.reset();
+  recorder.sport = game.sport; recorder.regular = game.regular;
   replayer.stop();
   chase.snap(rider);
   menuEl.classList.add('hidden');
@@ -242,9 +255,9 @@ function boardChair() {
   game.mode = 'lift';
   rider.beginSit();
   camBlend = { t: 0, pos: camera.position.clone(), quat: camera.quaternion.clone() };
-  // look out over the run: toward the run side (+p) and back downhill
-  const d = curLift.p.clone().multiplyScalar(1).addScaledVector(curLift.f, -0.9);
-  liftCam.yaw = Math.atan2(d.x, d.z); liftCam.pitch = -0.42;
+  // look up the mountain along the cable, with the chairs ahead in view
+  const d = curLift.f.clone().addScaledVector(curLift.p, -0.12);
+  liftCam.yaw = Math.atan2(d.x, d.z); liftCam.pitch = 0.04;
 }
 
 function skipLift() {
@@ -333,10 +346,10 @@ function liftInput(inp, dt) {
   if (n && pad(BTN.DOWN)) { hlSel = (hlSel + 1) % n; renderHighlights(); }
   if (n && pad(BTN.UP)) { hlSel = (hlSel + n - 1) % n; renderHighlights(); }
   if (n && pad(BTN.A)) playHighlight(hlSel);
-  // look around: mouse drag, right stick, arrow keys / WASD
+  // look around: mouse drag, right stick, arrow keys
   const k = (c) => input.keys.has(c);
-  const keyX = (k('ArrowRight') || k('KeyD') ? 1 : 0) - (k('ArrowLeft') || k('KeyA') ? 1 : 0);
-  const keyY = (k('ArrowDown') || k('KeyS') ? 1 : 0) - (k('ArrowUp') || k('KeyW') ? 1 : 0);
+  const keyX = (k('ArrowRight') ? 1 : 0) - (k('ArrowLeft') ? 1 : 0);
+  const keyY = (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') ? 1 : 0);
   liftCam.yaw -= inp.mouseX * 0.005 + (inp.lookX + keyX) * 1.8 * dt;
   liftCam.pitch = Math.max(-1.2, Math.min(0.6, liftCam.pitch - inp.mouseY * 0.004 - (inp.lookY + keyY) * 1.4 * dt));
 }
@@ -446,8 +459,10 @@ function tick(dt, now) {
   if (inp.helpPressed) hud.toggleHelp();
 
   if (game.mode === 'menu') {
-    if (inp.leftPressed) setStance(true);
-    if (inp.rightPressed) setStance(false);
+    if (inp.leftPressed && game.sport === 'board') setStance(true);
+    if (inp.rightPressed && game.sport === 'board') setStance(false);
+    if (inp.upPressed) setSport('board');
+    if (inp.downPressed) setSport('ski');
     if (inp.confirmPressed) startRun();
     // slow orbit preview of the rider at the top
     const t = now / 4000;
@@ -520,7 +535,7 @@ function tick(dt, now) {
       document.getElementById('lift-status').textContent = replayer.active ? 'Lift paused while you watch' : `${Math.ceil(left)} s to the top`;
       if (replayer.active) {
         const k = (c) => input.keys.has(c);
-        const kx = (k('ArrowRight') || k('KeyD') ? 1 : 0) - (k('ArrowLeft') || k('KeyA') ? 1 : 0), ky = (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') || k('KeyW') ? 1 : 0);
+        const kx = (k('ArrowRight') ? 1 : 0) - (k('ArrowLeft') ? 1 : 0), ky = (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') ? 1 : 0);
         replayer.update(dt); replayer.updateCamera(camera, dt, { x: inp.lookX + kx + inp.mouseX * 0.4, y: inp.lookY + ky + inp.mouseY * 0.4 }, terrain);
       }
       else updateLiftCamera();

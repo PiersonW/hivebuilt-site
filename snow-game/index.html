@@ -33,6 +33,11 @@
   <h1>SNOW GAME</h1>
   <p class="sub">Stage 1 prototype · ride feel test</p>
   <div class="stance">
+    <span>Rider</span>
+    <button id="btn-board" class="opt">🏂 Snowboarder</button>
+    <button id="btn-ski" class="opt">⛷️ Skier</button>
+  </div>
+  <div class="stance" id="stance-row">
     <span>Stance</span>
     <button id="btn-regular" class="opt">Regular</button>
     <button id="btn-goofy" class="opt">Goofy</button>
@@ -40,7 +45,7 @@
   <p id="pad-help" class="warn hidden">Controller not reaching the game? Hold the Menu button (three lines) until a menu appears, then choose “Use game controls”. Then press A.</p>
   <button id="btn-start" class="big">Drop in</button>
   <button id="btn-fullscreen" class="opt small">Full screen</button>
-  <p class="hint">Keyboard: ←/→ change stance · Enter to start<br>Xbox: D-pad stance · A to start</p>
+  <p class="hint">Keyboard: ↑/↓ snowboarder or skier · ←/→ stance · Enter to start<br>Xbox: D-pad up/down rider · left/right stance · A to start</p>
   <div id="menu-controls"></div>
 </div>
 
@@ -72,6 +77,6 @@
   <div class="muted">Drag or right stick to orbit</div>
 </div>
 
-<script type="module" src="src-v5/main.js"></script>
+<script type="module" src="src-v6/main.js"></script>
 </body>
 </html>

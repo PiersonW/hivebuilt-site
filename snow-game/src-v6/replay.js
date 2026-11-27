@@ -58,7 +58,7 @@ export class Recorder {
       if (n < 2) return false;
       const frames = new Float32Array(n * F);
       for (let i = 0; i < n; i++) frames.set(this.buf.subarray(((h.start + i) % RING) * F, ((h.start + i) % RING) * F + F), i * F);
-      this.highlights.push({ name: h.name, points: h.points, frames, n });
+      this.highlights.push({ name: h.name, points: h.points, frames, n, sport: this.sport || 'board' });
       this.highlights.sort((a, b) => b.points - a.points);
       this.highlights.length = Math.min(3, this.highlights.length);
       return false;
@@ -86,6 +86,7 @@ export class Replayer {
     this.h = h; this.t = 0;
     this.ghost.root.visible = true;
     this.ghost.regular = h.frames[14] === 1;
+    this.ghost.setSport(h.sport || 'board');
     this.ghost.setStance(this.ghost.regular);
     this._apply(0, 1 / 30);
     this.yaw = Math.atan2(-this.vel.x, -this.vel.z) + 2.4;

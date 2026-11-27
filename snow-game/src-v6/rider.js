@@ -15,7 +15,7 @@ export const TUNE = {
   carveScrub: 0.12,       // share of speed lost per radian the carve turns you
   snowFriction: 0.045,
   drag: 0.0078,           // normal stance air drag (v^2): straight down the steep middle tops out near 50 mph
-  tuckDrag: 0.0024,       // low: a straight tuck keeps building toward 60-65 mph
+  tuckDrag: 0.0013,       // low: a straight tuck keeps building toward 60-65 mph
   standDrag: 0.02,
   brakeDecel: 11,
   jumpBase: 3.6,          // m/s pop with no charge
@@ -39,6 +39,9 @@ export const TUNE = {
   crashFriction: 9,       // m/s^2 slowing while tumbling
   crashMaxSpeed: 14,      // m/s, tumble speed right after a crash
 };
+
+// Skiers use the same four grab buttons with ski grab names.
+export const SKI_GRABS = { 'Indy': 'Safety', 'Melon': 'Mute', 'Method': 'Japan', 'Nose Grab': 'Tail Grab' };
 
 const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 const damp = (a, b, rate, dt) => a + (b - a) * (1 - Math.exp(-rate * dt));
@@ -122,6 +125,21 @@ export class Rider {
     for (const m of [deck, top, nose, tail]) { m.castShadow = true; this.boardG.add(m); }
     root.add(this.boardG);
 
+    // skis (two, along z, tips at -z) for the skier
+    this.skisG = new THREE.Group();
+    const skiMat = flat(0x1e8fd6), skiTop = flat(0xf4f4f4);
+    for (const sx of [-0.14, 0.14]) {
+      const ski = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 1.7), skiMat); ski.position.set(sx, 0.025, 0.05);
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.01, 1.4), skiTop); stripe.position.set(sx, 0.045, 0.05);
+      const tipS = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.2), skiMat); tipS.position.set(sx, 0.07, -0.86); tipS.rotation.x = 0.5;
+      const tailS = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.14), skiMat); tailS.position.set(sx, 0.05, 0.94); tailS.rotation.x = -0.35;
+      for (const m of [ski, stripe, tipS, tailS]) { m.castShadow = true; this.skisG.add(m); }
+    }
+    this.skisG.visible = false;
+    root.add(this.skisG);
+    this.sport = 'board';
+    this.gear = this.boardG;
+
     // body (faces +z in its own frame; rotated so it stands sideways on the board)
     this.body = new THREE.Group();
     root.add(this.body);
@@ -137,6 +155,8 @@ export class Rider {
     this.helmet = new THREE.Mesh(new THREE.SphereGeometry(0.165, 7, 4, 0, Math.PI * 2, 0, Math.PI * 0.55), this.mats.helmet);
     this.helmet.castShadow = true; this.body.add(this.helmet);
     this.goggles = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.06), flat(0x30e0c0)); this.body.add(this.goggles);
+    this.poles = [mk(flat(0x9aa3ad)), mk(flat(0x9aa3ad))];
+    for (const pl of this.poles) pl.visible = false;
 
     this.handPos = [new THREE.Vector3(0.5, 0.9, 0.1), new THREE.Vector3(-0.5, 0.9, 0.1)];
     this.pose = { hipH: 0.92, lean: 0.15, boardLift: 0, boardRX: 0, boardRZ: 0, feetLift: 0 };
@@ -145,13 +165,29 @@ export class Rider {
 
   setStance(regular) {
     this.regular = regular;
-    this.body.rotation.y = regular ? Math.PI / 2 : -Math.PI / 2;
+    this._orientBody();
   }
 
-  // Board-local point -> body-local point.
+  // 'board' (snowboarder, stands sideways) or 'ski' (skier, faces forward with poles).
+  setSport(sport) {
+    this.sport = sport;
+    const ski = sport === 'ski';
+    this.boardG.visible = !ski; this.skisG.visible = ski;
+    for (const pl of this.poles) pl.visible = ski;
+    this.gear = ski ? this.skisG : this.boardG;
+    this.boardG.position.set(0, 0, 0); this.boardG.rotation.set(0, 0, 0); this.boardG.updateMatrix();
+    this.skisG.position.set(0, 0, 0); this.skisG.rotation.set(0, 0, 0); this.skisG.updateMatrix();
+    this._orientBody();
+  }
+
+  _orientBody() {
+    this.body.rotation.y = this.sport === 'ski' ? Math.PI : (this.regular ? Math.PI / 2 : -Math.PI / 2);
+  }
+
+  // Board/ski-local point -> body-local point.
   _boardToBody(v, phantom) {
     const p = v.clone();
-    if (!phantom) p.applyMatrix4(this.boardG.matrix);
+    if (!phantom) p.applyMatrix4(this.gear.matrix);
     else p.y += this.pose.feetLift;
     return p.applyMatrix4(this._bodyInv);
   }
@@ -168,9 +204,15 @@ export class Rider {
     let boardLift = 0, rx = 0, rz = 0, feetLift = 0;
     if (this.state === 'air') { hipH = 0.78; lean = 0.35; }
     if (grab) { hipH = 0.8; lean = 0.85; boardLift = 0.42; }
-    if (grab === 'Nose Grab') { rx = 0.35; lean = 0.95; }
-    if (grab === 'Method') { rz = -sig * 0.75; boardLift = 0.6; lean = 0.55; }
-    if (grab === 'Melon') { rz = sig * 0.25; }
+    const ski = this.sport === 'ski';
+    if (!ski) {
+      if (grab === 'Nose Grab') { rx = 0.35; lean = 0.95; }
+      if (grab === 'Method') { rz = -sig * 0.75; boardLift = 0.6; lean = 0.55; }
+      if (grab === 'Melon') { rz = sig * 0.25; }
+    } else {
+      if (grab === 'Method') { rx = -0.55; boardLift = 0.5; lean = 0.6; }      // Japan: skis tucked up behind
+      if (grab === 'Nose Grab') { rx = -0.45; lean = 0.7; }                     // Tail grab: tails swing up
+    }
     if (phantom) { hipH = 0.85; lean = 0.25; feetLift = 0.35; }
     if (crashing) { hipH = 0.95; lean = -0.2; }
     const seated = this.state === 'lift';
@@ -183,8 +225,8 @@ export class Rider {
     P.boardLift = damp(P.boardLift, boardLift, r, dt); P.boardRX = damp(P.boardRX, rx, r, dt);
     P.boardRZ = damp(P.boardRZ, rz, r, dt); P.feetLift = damp(P.feetLift, feetLift, r, dt);
 
-    // board transform
-    const bg = this.boardG;
+    // board / ski transform
+    const bg = this.gear;
     bg.position.set(0, P.boardLift, 0);
     bg.rotation.set(P.boardRX, 0, P.boardRZ);
     if (seated) {
@@ -204,7 +246,8 @@ export class Rider {
     this._bodyInv = this.body.matrix.clone().invert();
 
     // feet on the bindings
-    const bind = [new THREE.Vector3(0, 0.07, -0.27), new THREE.Vector3(0, 0.07, 0.27)].map(v => this._boardToBody(v, phantom));
+    const bindings = ski ? [new THREE.Vector3(-0.14, 0.06, 0), new THREE.Vector3(0.14, 0.06, 0)] : [new THREE.Vector3(0, 0.07, -0.27), new THREE.Vector3(0, 0.07, 0.27)];
+    const bind = bindings.map(v => this._boardToBody(v, phantom));
     bind.sort((a, b) => b.x - a.x); // index 0 = body +x side
     const lean2 = P.lean;
     const hipC = new THREE.Vector3(0, P.hipH + (phantom ? P.feetLift : 0) + P.boardLift * 0.6, -0.06 - 0.1 * lean2);
@@ -214,7 +257,7 @@ export class Rider {
       const side = i === 0 ? 1 : -1;
       const hip = hipC.clone().add(new THREE.Vector3(side * 0.12, 0, 0));
       const foot = bind[i];
-      const knee = ik(hip, foot, 0.46, 0.46, fwd.clone().add(new THREE.Vector3(side * 0.3, 0, 0)));
+      const knee = ik(hip, foot, 0.46, 0.46, fwd.clone().add(new THREE.Vector3(side * (ski ? 0.05 : 0.3), 0, 0)));
       placeLimb(this.thighs[i], hip, knee, 0.15);
       placeLimb(this.shins[i], knee, foot, 0.13);
       this.boots[i].position.copy(foot).add(new THREE.Vector3(0, 0.03, 0.03));
@@ -243,10 +286,21 @@ export class Rider {
     t[0].z += this.lean * 0.4; t[1].z -= this.lean * 0.4;
     const edge = (side, z) => this._boardToBody(new THREE.Vector3(side * 0.16, 0.06, z), false);
     const back = 1 - lead;
-    if (grab === 'Indy') t[back] = edge(sig, 0.08 * (this.regular ? 1 : -1));
-    if (grab === 'Melon') t[lead] = edge(-sig, 0);
-    if (grab === 'Method') { t[lead] = edge(-sig, 0); t[back] = sh[back].clone().add(new THREE.Vector3((back === 0 ? 1 : -1) * 0.3, 0.45, -0.1)); }
-    if (grab === 'Nose Grab') t[lead] = this._boardToBody(new THREE.Vector3(0, 0.08, -0.7), false);
+    if (ski) {
+      // skier: hands holding the poles out front, and ski grabs
+      t[0] = sh[0].clone().add(new THREE.Vector3(0.12, -0.42 + 0.1 * this.crouch, 0.32));
+      t[1] = sh[1].clone().add(new THREE.Vector3(-0.12, -0.42 + 0.1 * this.crouch, 0.32));
+      const skiPt = (rootX, z) => this._boardToBody(new THREE.Vector3(rootX, 0.05, z), false);
+      if (grab === 'Indy') t[0] = skiPt(-0.22, 0.05);              // Safety: hand to the outside of its own ski
+      if (grab === 'Melon') t[1] = skiPt(-0.1, -0.15);             // Mute: hand crosses over to the other ski
+      if (grab === 'Method') t[0] = skiPt(-0.14, -0.4);            // Japan: front of the ski, skis behind
+      if (grab === 'Nose Grab') t[1] = skiPt(0.14, 0.62);          // Tail grab
+    } else {
+      if (grab === 'Indy') t[back] = edge(sig, 0.08 * (this.regular ? 1 : -1));
+      if (grab === 'Melon') t[lead] = edge(-sig, 0);
+      if (grab === 'Method') { t[lead] = edge(-sig, 0); t[back] = sh[back].clone().add(new THREE.Vector3((back === 0 ? 1 : -1) * 0.3, 0.45, -0.1)); }
+      if (grab === 'Nose Grab') t[lead] = this._boardToBody(new THREE.Vector3(0, 0.08, -0.7), false);
+    }
     if (phantom) { t[0] = sh[0].clone().add(new THREE.Vector3(0.3, 0.5, 0.1)); t[1] = sh[1].clone().add(new THREE.Vector3(-0.3, 0.5, 0.1)); }
     if (seated) { t[0] = new THREE.Vector3(0.2, 0.62, 0.3); t[1] = new THREE.Vector3(-0.2, 0.62, 0.3); }
     if (gettingUp && gu < 0.55) {   // hands push off the snow
@@ -267,6 +321,12 @@ export class Rider {
       placeLimb(this.foreArms[i], elbow, this.handPos[i], 0.1);
       this.hands[i].position.copy(this.handPos[i]);
       this.hands[i].scale.set(0.1, 0.1, 0.1);
+      if (ski) {   // pole runs from the hand down and back toward the snow
+        const flying = this.state === 'air' || this.state === 'grind';
+        const tipP = this.handPos[i].clone().add(flying ? new THREE.Vector3(i === 0 ? 0.15 : -0.15, -0.55, -0.9) : new THREE.Vector3(0, -1.05, -0.35));
+        if (!flying) tipP.y = Math.max(tipP.y, 0.04);
+        placeLimb(this.poles[i], this.handPos[i], tipP, 0.03);
+      }
     }
   }
 
@@ -307,7 +367,7 @@ export class Rider {
     else if (this.state === 'grind') this._grind(dt, input);
     else if (this.state === 'crash') this._crash(dt);
     this.railCooldown = Math.max(0, this.railCooldown - dt);
-    if ((this.state === 'ride' || this.state === 'air') && this.railCooldown <= 0) this._tryRail();
+    if ((this.state === 'ride' || this.state === 'air') && this.railCooldown <= 0) this._tryRail(input);
     // hard top speed (65 mph), on the ground and in the air
     const v = this.vel.length();
     if (v > TUNE.topSpeed) this.vel.multiplyScalar(TUNE.topSpeed / v);
@@ -337,13 +397,17 @@ export class Rider {
     let rate = T.turnRate + (T.turnRateFast - T.turnRate) * k;
     if (tuck) rate *= T.tuckTurnMul;
     if (brake) rate *= 1.3;
-    this.yaw += input.steer * rate * dt;
+    // holding the grind button sets you up for a rail: arrows pick the boardslide side instead of steering
+    const steerIn = input.grind ? 0 : input.steer;
+    this.yaw += steerIn * rate * dt;
     this.lean = damp(this.lean, input.steer * (0.25 + 0.45 * k) * (brake ? 0.4 : 1), 8, dt);
     // which edge are we on? turning toward the side you face = toe edge
     const faceSign = (this.regular ? 1 : -1) * (this.switch ? -1 : 1);
     if (!brake && Math.abs(this.lean) > 0.06) this.edge = Math.sign(this.lean) === faceSign ? 1 : -1;
     if (brake && this.brakeAmt < 0.05) this.brakeEdge = this.edge;     // skid on the edge you were on
     if (!brake && this.brakeAmt < 0.05) this.brakeEdge = this.edge;
+    if (Math.abs(input.steer) > 0.3) this.turnSide = Math.sign(input.steer);
+    if (!brake && this.brakeAmt < 0.05) this.brakeSide = this.turnSide || 1;
 
     // board axes on the slope
     const f = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -475,7 +539,7 @@ export class Rider {
       this.phantomT += dt / T.phantomTime;
       if (this.phantomT >= 1) { this.phantomT = -1; this.events.push({ type: 'phantom-done' }); }
     }
-    if (this.grab && this.phantomT < 0) this.events.push({ type: 'grab', name: this.grab, dt });
+    if (this.grab && this.phantomT < 0) this.events.push({ type: 'grab', name: this.sport === 'ski' ? SKI_GRABS[this.grab] : this.grab, dt });
 
     // landing
     const gh = this.terrain.heightAt(this.pos.x, this.pos.z);
@@ -593,35 +657,38 @@ export class Rider {
   }
 
   // ---------------- rails and boxes ----------------
-  _tryRail() {
+  // Lock onto a rail, box or log. Riding straight onto one locks on by itself; holding the grind
+  // button (E / stick click) pulls you on from further away (and with left/right, into a boardslide).
+  _tryRail(input = {}) {
     const rails = this.terrain.rails;
     if (!rails) return;
+    const magnet = !!input.grind;
     const p = this.pos, v = this.vel, vh = Math.hypot(v.x, v.z);
-    if (vh < 2 || v.y > 2.5) return;
+    if (vh < 2 || v.y > (magnet ? 4 : 2.5)) return;
     for (const r of rails) {
       const dx = p.x - r.p0.x, dz = p.z - r.p0.z;
       if (dx * dx + dz * dz > (r.lenH + 3) * (r.lenH + 3)) continue;
       const u = (dx * r.dirH.x + dz * r.dirH.z) / r.lenH;
       if (u < 0.02 || u > 0.97) continue;
       const lat = Math.abs(-dx * r.dirH.z + dz * r.dirH.x);
-      if (lat > r.halfW + 0.35) continue;
+      if (lat > r.halfW + (magnet ? 1.3 : 0.35)) continue;
       const ry = r.p0.y + (r.p1.y - r.p0.y) * u;
       const dy = p.y - ry;
-      if (dy < -(r.snapBelow || 0.45) || dy > 0.75) continue;
+      if (dy < -(r.snapBelow || 0.45) - (magnet ? 0.5 : 0) || dy > (magnet ? 1.6 : 0.75)) continue;
       const along = (v.x * r.dirH.x + v.z * r.dirH.z) / vh;
-      if (Math.abs(along) < 0.6) continue;
-      this._startGrind(r, u, along);
+      if (Math.abs(along) < (magnet ? 0.35 : 0.6)) continue;
+      this._startGrind(r, u, along, magnet ? Math.sign(Math.abs(input.steer) > 0.3 ? input.steer : 0) : null);
       return;
     }
   }
 
-  _startGrind(r, u, along) {
+  _startGrind(r, u, along, slideChoice = null) {
     const wasAir = this.state === 'air';
     const railHead = Math.atan2(r.dirH.x * Math.sign(along), -r.dirH.z * Math.sign(along));
     // board across the rail = boardslide; along it = 50-50 (forwards or switch)
     const boardYaw = wasAir ? this.airYaw : this.yaw + (this.switch ? Math.PI : 0);
     const d = wrap(boardYaw - railHead);
-    this.boardslide = Math.abs(Math.abs(d) - Math.PI / 2) < 0.6 ? Math.sign(d) : 0;
+    this.boardslide = slideChoice !== null ? slideChoice : (Math.abs(Math.abs(d) - Math.PI / 2) < 0.6 ? Math.sign(d) : 0);
     this.switch = !this.boardslide && Math.abs(d) > Math.PI / 2;
     this.state = 'grind';
     this.rail = r;
@@ -645,9 +712,10 @@ export class Rider {
     this.vel.copy(r.dir3).multiplyScalar(this.railV);
     this.crouch = damp(this.crouch, 0.35, 8, dt); this.lean = damp(this.lean, 0, 8, dt);
     this.brakeAmt = 0; this.spray = 0;
+    const ski = this.sport === 'ski';
     const name = r.kind === 'box' ? (this.boardslide ? 'Box Slide' : 'Box 50-50')
       : r.kind === 'log' ? (this.boardslide ? 'Log Slide' : 'Log Ride')
-      : (this.boardslide ? 'Boardslide' : '50-50');
+      : (this.boardslide ? (ski ? 'Rail Slide' : 'Boardslide') : (ski ? 'Ski 50-50' : '50-50'));
     this.events.push({ type: 'grind', name, dt });
     // pop off with a jump, or ride off the end
     if (input.jump) this.charge = Math.min(1, this.charge + dt / TUNE.chargeTime);
@@ -698,10 +766,12 @@ export class Rider {
       if (onSnow) {
         // brake: skid the board sideways onto the edge you were riding (toe or heel)
         const faceSign = (this.regular ? 1 : -1) * (this.switch ? -1 : 1);
-        const brakeTwist = this.brakeAmt * 1.25 * faceSign * this.brakeEdge;
+        const brakeTwist = this.sport === 'ski' ? this.brakeAmt * 1.25 * (this.brakeSide || 1) : this.brakeAmt * 1.25 * faceSign * this.brakeEdge;
         const vis = this.yaw + (this.switch ? Math.PI : 0) + brakeTwist + this.boardslide * Math.PI / 2;
         const leanSign = this.switch ? -1 : 1;
-        const lean = -this.lean * leanSign + this.brakeAmt * 0.25 * faceSign * this.brakeEdge * leanSign;
+        const lean = this.sport === 'ski'
+          ? -this.lean * leanSign - this.brakeAmt * 0.3 * (this.brakeSide || 1) * leanSign
+          : -this.lean * leanSign + this.brakeAmt * 0.25 * faceSign * this.brakeEdge * leanSign;
         q.copy(this.alignQ)
           .multiply(new THREE.Quaternion().setFromAxisAngle(UP, -vis))
           .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), lean));
