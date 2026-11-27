@@ -11,6 +11,7 @@ import { Chairlift } from './lift.js';
 import { Recorder, Replayer } from './replay.js';
 import { TrailMap } from './trailmap.js';
 import { BTN } from './input.js';
+import { Npcs } from './npcs.js';
 
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('game');
@@ -57,6 +58,11 @@ const trailMap = new TrailMap(terrain, lifts);
 document.getElementById('map-wrap').appendChild(trailMap.canvas);
 
 const rider = new Rider(scene, terrain);
+// other skiers and snowboarders, on the runs and on the chairs
+const npcs = new Npcs(scene, terrain, {
+  count: LOW_GFX ? 7 : 14, lifts, laneEntrance,
+  playerChair: () => (game.mode === 'liftwait' || game.mode === 'lift') ? { lift: curLift, index: chairIdx } : null,
+});
 const ghost = new Rider(scene, terrain);        // model used for highlight replays
 const recorder = new Recorder();
 const replayer = new Replayer(ghost);
@@ -123,7 +129,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
+window.__game = { npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -229,6 +235,8 @@ function endRun(l) {
 
 // Near the base: which lift is closest, how far, and which way (relative to the camera).
 const liftGuideEl = document.getElementById('lift-guide');
+const pushHintEl = document.getElementById('push-hint');
+const pushHint = { t: 0 };
 let inLane = null;
 // where the lift line starts (between the ropes, at the back of the line)
 function laneEntrance(l) { return l.bottom.clone().addScaledVector(l.f, l.lane.d0 - 3).addScaledVector(l.p, (l.lane.l0 + l.lane.l1) / 2); }
@@ -516,6 +524,12 @@ function tick(dt, now) {
       }
     }
     if (game.mode === 'run') updateLiftGuide();
+    // stopped on a flat: remind how to push along
+    const slow = game.mode === 'run' && rider.state === 'ride' && rider.speed < 1.2 && !inLane && rider.pushAmt < 0.2;
+    pushHint.t = slow ? pushHint.t + dt : 0;
+    const showHint = pushHint.t > 1.2;
+    if (showHint) pushHintEl.textContent = input.padName ? 'Push the left stick up to push yourself along' : 'Hold ↑ to push yourself along';
+    pushHintEl.classList.toggle('hidden', !showHint);
   }
 
   else if (game.mode === 'liftwait' || game.mode === 'lift') {
@@ -545,6 +559,7 @@ function tick(dt, now) {
   }
 
   if (!replayer.active) for (const l of lifts) l.update(dt);
+  if (!(game.mode === 'run' && game.paused)) npcs.update(dt, camera.position, rider.pos);
 
   // wide view of the resort from the lift, normal fog while riding
   const fogWant = game.mode === 'lift' && !replayer.active ? 0.00022 : 0.00042;

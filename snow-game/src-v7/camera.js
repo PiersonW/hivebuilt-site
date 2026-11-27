@@ -17,11 +17,13 @@ export class ChaseCam {
     this.shake = 0;
     this.off = new THREE.Vector3(0, 2.4, 6);
     this.crashAnchor = new THREE.Vector3();
+    this.shift = 0.85;   // m the camera sits to the right of the rider, so you ride a little left of centre
   }
 
   snap(rider) {
     this.dir.set(Math.sin(rider.yaw), 0, -Math.cos(rider.yaw));
-    this.off.copy(this.dir).multiplyScalar(-6); this.off.y = 2.4;
+    this.off.copy(this.dir).multiplyScalar(-4.6); this.off.y = 1.9;
+    this.off.addScaledVector(new THREE.Vector3(-this.dir.z, 0, this.dir.x), this.shift);
     this.pos.copy(rider.pos).add(this.off);
     this.crashAnchor.copy(rider.pos);
     this.look.copy(rider.pos);
@@ -41,14 +43,14 @@ export class ChaseCam {
     if (air && rider.airTime < 0.05) this.swingSide = Math.random() < 0.5 ? -1 : 1;
     const wantSwing = air && rider.airTime > 0.15 ? 1 : 0;
     this.swing = damp(this.swing, wantSwing, air ? 1.6 : 3, dt);
-    this.dist = damp(this.dist, crash ? 8 : 5.6 + sp * 0.05 + this.swing * 1.5, 2.5, dt);
-    this.height = damp(this.height, crash ? 3.5 : 2.2 + this.swing * 0.8, 2.5, dt);
+    this.dist = damp(this.dist, crash ? 7 : 4.3 + sp * 0.04 + this.swing * 1.5, 2.5, dt);
+    this.height = damp(this.height, crash ? 3.2 : 1.85 + this.swing * 0.7, 2.5, dt);
 
     const side = new THREE.Vector3(-this.dir.z, 0, this.dir.x);
     // smooth the offset from the rider (not the world position) so fast travel doesn't drag the camera back
     const wantOff = new THREE.Vector3()
       .addScaledVector(this.dir, -this.dist)
-      .addScaledVector(side, this.swing * this.swingSide * 3.5);
+      .addScaledVector(side, this.swing * this.swingSide * 3.5 + this.shift * (1 - this.swing));
     wantOff.y = this.height;
     if (crash) { this.off.lerp(wantOff, 1 - Math.exp(-1.5 * dt)); }
     else {
@@ -62,7 +64,8 @@ export class ChaseCam {
     else this.crashAnchor.lerp(rider.pos, 1 - Math.exp(-2 * dt));
     this.pos.y = Math.max(this.pos.y, this.terrain.heightAt(this.pos.x, this.pos.z) + 1.2);
 
-    const lookWant = rider.pos.clone().addScaledVector(this.dir, crash ? 0 : 3.5);
+    const lookWant = rider.pos.clone().addScaledVector(this.dir, crash ? 0 : 3.5)
+      .addScaledVector(side, this.shift * (1 - this.swing));
     lookWant.y += 0.9;
     this.look.lerp(lookWant, 1 - Math.exp(-12 * dt));
 

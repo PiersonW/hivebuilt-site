@@ -35,7 +35,11 @@ export const TUNE = {
   getupTime: 1.3,         // seconds to stand back up
   landImpact: 32,         // m/s into the slope = too hard a landing
   railFriction: 1.2,      // m/s^2 slowing on rails and boxes
-  skateMaxUphill: 0.07,   // you can only skate on flats or very gentle uphill (lift lines)
+  skateMaxUphill: 0.07,   // the automatic shuffle only works on flats or very gentle uphill (lift lines)
+  pushMaxUphill: 0.15,    // pushing (hold up) gets you over small rises, never up a real slope
+  pushMaxSpeed: 5.5,      // m/s (~12 mph): pushing stops helping above this
+  pushAccel: 4.2,         // m/s^2 during each push stroke
+  pushRate: 1.25,         // push strokes per second
   crashFriction: 9,       // m/s^2 slowing while tumbling
   crashMaxSpeed: 14,      // m/s, tumble speed right after a crash
 };
@@ -101,6 +105,7 @@ export class Rider {
     this.brakeEdge = -1;
     this.getupT = -1;
     this.rail = null; this.railCooldown = 0; this.boardslide = 0;
+    this.pushAmt = 0; this.pushPhase = 0;   // pushing along flats: back foot out (board) or poles (ski)
     this._buildModel();
   }
 
@@ -195,6 +200,7 @@ export class Rider {
   _updatePose(dt, input) {
     const P = this.pose;
     const sig = this.regular ? 1 : -1;          // toe edge side in board frame (+x for regular)
+    this.sig = sig;
     const grab = this.state === 'air' ? this.grab : null;
     const crashing = this.state === 'crash' && this.getupT < 0;
     const phantom = this.phantomT >= 0;
@@ -212,6 +218,12 @@ export class Rider {
     } else {
       if (grab === 'Method') { rx = -0.55; boardLift = 0.5; lean = 0.6; }      // Japan: skis tucked up behind
       if (grab === 'Nose Grab') { rx = -0.45; lean = 0.7; }                     // Tail grab: tails swing up
+    }
+    const push = this.state === 'ride' ? this.pushAmt : 0;
+    const ph = this.pushPhase, stroke = ph < 0.55 ? Math.sin(Math.PI * ph / 0.55) : 0;
+    if (push > 0.02) {
+      if (ski) { hipH -= push * 0.14 * stroke; lean += push * 0.45 * stroke; }      // fold over the poles as you push
+      else { hipH -= push * 0.1; lean += push * 0.12; }                             // flex the front knee
     }
     if (phantom) { hipH = 0.85; lean = 0.25; feetLift = 0.35; }
     if (crashing) { hipH = 0.95; lean = -0.2; }
@@ -248,6 +260,17 @@ export class Rider {
     // feet on the bindings
     const bindings = ski ? [new THREE.Vector3(-0.14, 0.06, 0), new THREE.Vector3(0.14, 0.06, 0)] : [new THREE.Vector3(0, 0.07, -0.27), new THREE.Vector3(0, 0.07, 0.27)];
     const bind = bindings.map(v => this._boardToBody(v, phantom));
+    // board: unstrap the back foot and kick along on the snow beside the board (toe side)
+    if (!ski && push > 0.02) {
+      const sw = this.switch ? -1 : 1;
+      const backIdx = sw > 0 ? 1 : 0;                       // binding toward the tail (+z) when riding forward
+      // foot plants by the front binding, pushes back past the tail, then lifts and swings forward again
+      const z = ph < 0.55 ? -0.1 + 0.75 * (ph / 0.55) : 0.65 - 0.75 * ((ph - 0.55) / 0.45);
+      const y = ph < 0.55 ? -0.02 : 0.12 * Math.sin(Math.PI * (ph - 0.55) / 0.45);
+      const out = this._boardToBody(new THREE.Vector3(this.sig * 0.3, y, z * sw), false);
+      out.y = Math.max(out.y, -0.03 + y);
+      bind[backIdx].lerp(out, push);
+    }
     bind.sort((a, b) => b.x - a.x); // index 0 = body +x side
     const lean2 = P.lean;
     const hipC = new THREE.Vector3(0, P.hipH + (phantom ? P.feetLift : 0) + P.boardLift * 0.6, -0.06 - 0.1 * lean2);
@@ -291,6 +314,15 @@ export class Rider {
       t[0] = sh[0].clone().add(new THREE.Vector3(0.12, -0.42 + 0.1 * this.crouch, 0.32));
       t[1] = sh[1].clone().add(new THREE.Vector3(-0.12, -0.42 + 0.1 * this.crouch, 0.32));
       const skiPt = (rootX, z) => this._boardToBody(new THREE.Vector3(rootX, 0.05, z), false);
+      if (push > 0.02) {
+        // double pole: reach forward, plant, pull through past the hips, swing back forward
+        const reach = ph < 0.55 ? 1 - ph / 0.55 : (ph - 0.55) / 0.45;     // 1 = arms forward, 0 = pushed back
+        const hy = -0.25 + 0.15 * reach, hz = -0.15 + 0.6 * reach;
+        for (let i = 0; i < 2; i++) {
+          const want = sh[i].clone().add(new THREE.Vector3(i === 0 ? 0.14 : -0.14, hy, hz));
+          t[i].lerp(want, push);
+        }
+      }
       if (grab === 'Indy') t[0] = skiPt(-0.22, 0.05);              // Safety: hand to the outside of its own ski
       if (grab === 'Melon') t[1] = skiPt(-0.1, -0.15);             // Mute: hand crosses over to the other ski
       if (grab === 'Method') t[0] = skiPt(-0.14, -0.4);            // Japan: front of the ski, skis behind
@@ -324,6 +356,9 @@ export class Rider {
       if (ski) {   // pole runs from the hand down and back toward the snow
         const flying = this.state === 'air' || this.state === 'grind';
         const tipP = this.handPos[i].clone().add(flying ? new THREE.Vector3(i === 0 ? 0.15 : -0.15, -0.55, -0.9) : new THREE.Vector3(0, -1.05, -0.35));
+        if (!flying && push > 0.02 && ph < 0.55) {   // pole tips stay planted in the snow behind the hands while pushing
+          tipP.copy(this.handPos[i]).add(new THREE.Vector3(0, -1.1, -0.35 - 0.25 * (ph / 0.55)));
+        }
         if (!flying) tipP.y = Math.max(tipP.y, 0.04);
         placeLimb(this.poles[i], this.handPos[i], tipP, 0.03);
       }
@@ -385,8 +420,14 @@ export class Rider {
     this.terrain.normalBehind(this.pos.x, this.pos.z, this.vel.x, this.vel.z, n);
     const speed = this.speed;
     const tuck = input.down && !input.jump;
-    const stand = input.up;
     const brake = input.brake;
+    // hold up when slow: push yourself along (back foot out on the board, poles for skiers)
+    const fwdNow = Math.sin(this.yaw) * this.vel.x - Math.cos(this.yaw) * this.vel.z;
+    const pushing = !!input.up && !brake && !tuck && fwdNow < T.pushMaxSpeed + 1.5;
+    const stand = input.up && !pushing;
+    this.pushAmt = damp(this.pushAmt, pushing ? 1 : 0, 6, dt);
+    if (this.pushAmt > 0.02) this.pushPhase = (this.pushPhase + dt * T.pushRate) % 1;
+    else this.pushPhase = 0;
     this.brakeAmt = damp(this.brakeAmt, brake ? 1 : 0, 8, dt);
 
     // crouch: tuck or charging a jump
@@ -445,7 +486,12 @@ export class Rider {
     if (sp > T.maxSpeed) dec += (sp - T.maxSpeed) * 1.5;   // soft speed limit
     if (sp > 1e-3) this.vel.multiplyScalar(Math.max(0, sp - dec * dt) / sp);
     // skating push when nearly stopped (flats and lift lines only, never up a real slope)
-    if (sp < 4 && !brake && f.y < T.skateMaxUphill) this.vel.addScaledVector(f, 2.5 * dt);
+    if (sp < 4 && !brake && !pushing && f.y < T.skateMaxUphill) this.vel.addScaledVector(f, 2.5 * dt);
+    // push stroke: the first ~55% of each cycle drives you forward, the rest is the foot / poles coming back
+    if (pushing && f.y < T.pushMaxUphill && this.pushPhase < 0.55) {
+      const vfw = this.vel.dot(f);
+      if (vfw < T.pushMaxSpeed) this.vel.addScaledVector(f, Math.min(T.pushMaxSpeed - vfw, T.pushAccel * Math.sin(Math.PI * this.pushPhase / 0.55) * 1.6 * dt));
+    }
 
     // jump charge / pop
     if (input.jump) this.charge = Math.min(1, this.charge + dt / T.chargeTime);

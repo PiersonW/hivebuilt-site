@@ -122,7 +122,7 @@ export class Input {
 export const CONTROLS = [
   ['Steer / spin', '← →', 'Left stick'],
   ['Tuck (fast) / back flip', '↓', 'Stick down · RT'],
-  ['Stand up (slow) / front flip', '↑', 'Stick up'],
+  ['Push along when slow / stand up / front flip', '↑', 'Stick up'],
   ['Jump (hold to charge)', 'Space', 'A'],
   ['Brake / skid', 'Shift', 'LT'],
   ['Grab 1 (Indy / Safety)', 'A', 'X'],
