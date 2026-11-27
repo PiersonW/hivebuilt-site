@@ -102,8 +102,30 @@ export class Chairlift {
   // The cable loop: up line, around the top wheel, down line, around the bottom wheel.
   _buildPath() {
     const r = WHEEL_R, p = this.p, f = this.f;
-    const up = this.towers.map(t => t.clone().addScaledVector(p, r));
-    const down = this.towers.map(t => t.clone().addScaledVector(p, -r)).reverse();
+    // through each station the cable stays low and level for a few metres, so the seat passes at
+    // knee height where you load and unload, then climbs to the first tower
+    const T = this.terrain, last = this.towers.length - 1;
+    const flat = (d, side, exact = false) => {
+      const q = this.bottom.clone().addScaledVector(f, d).addScaledVector(p, side * r);
+      q.y = (exact ? T.heightAt(q.x, q.z) : Math.max(T.heightAt(q.x, q.z), T.heightAt(q.x - p.x * side * 1.2, q.z - p.z * side * 1.2))) + HANG + 0.5;
+      return q;
+    };
+    const line = (side) => {
+      const pts = this.towers.map(t => t.clone().addScaledVector(p, side * r));
+      pts[0].y = Math.max(pts[0].y, flat(0, side).y);
+      const exitB = this.loadU + 6, exitT = this.length - 13;
+      const hd = (t) => Math.hypot(t.x - this.bottom.x, t.z - this.bottom.z);
+      const tq = flat(this.length, side); pts[last].y = Math.max(pts[last].y, tq.y);
+      // seat at knee height on the load and unload spots, level for a few metres, then up to the towers
+      const head = [pts[0], flat(this.loadU, side, true)];
+      if (this.towers[1] && exitB < hd(this.towers[1]) * 0.6) head.push(flat(exitB, side));
+      const tail = [];
+      if (exitT > hd(this.towers[last - 1]) + 12) tail.push(flat(exitT, side));
+      tail.push(flat(this.length - 7, side, true), pts[last]);
+      return [...head, ...pts.slice(1, last), ...tail];
+    };
+    const up = line(1);
+    const down = line(-1).reverse();
     const arc = (c, startDir, midDir) => {
       const out = [];
       for (let i = 0; i <= 12; i++) {

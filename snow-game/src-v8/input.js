@@ -130,7 +130,7 @@ export const CONTROLS = [
   ['Grab 3 (Method / Japan)', 'D', 'LB'],
   ['Grab 4 (Nose / Tail)', 'F', 'Y'],
   ['Phantom Flip (gear off feet)', 'W', 'RB'],
-  ['Grind: hold near a rail, box or log (+ ← → = boardslide)', 'E', 'Stick click'],
+  ['Grind: hold it to get on a rail, box or log (+ ← → = boardslide)', 'E', 'Stick click'],
   ['Restart / menu', 'R / Esc', 'Menu / View'],
   ['Pause', 'P', '—'],
 ];

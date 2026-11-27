@@ -709,6 +709,8 @@ export class Rider {
     const rails = this.terrain.rails;
     if (!rails) return;
     const magnet = !!input.grind;
+    // no grind button, no grind: run into a rail, box or log and you go down
+    if (!magnet) { if (this.state === 'ride' && !this.npc) this._railBump(); return; }
     const p = this.pos, v = this.vel, vh = Math.hypot(v.x, v.z);
     if (vh < 2 || v.y > (magnet ? 4 : 2.5)) return;
     for (const r of rails) {
@@ -724,6 +726,23 @@ export class Rider {
       const along = (v.x * r.dirH.x + v.z * r.dirH.z) / vh;
       if (Math.abs(along) < (magnet ? 0.35 : 0.6)) continue;
       this._startGrind(r, u, along, magnet ? Math.sign(Math.abs(input.steer) > 0.3 ? input.steer : 0) : null);
+      return;
+    }
+  }
+
+  _railBump() {
+    const p = this.pos;
+    if (Math.hypot(this.vel.x, this.vel.z) < 1.5) return;
+    for (const r of this.terrain.rails) {
+      const dx = p.x - r.p0.x, dz = p.z - r.p0.z;
+      if (dx * dx + dz * dz > (r.lenH + 2) * (r.lenH + 2)) continue;
+      const u = (dx * r.dirH.x + dz * r.dirH.z) / r.lenH;
+      if (u < -0.01 || u > 1.01) continue;
+      const lat = Math.abs(-dx * r.dirH.z + dz * r.dirH.x);
+      if (lat > r.halfW + 0.22) continue;
+      const ry = r.p0.y + (r.p1.y - r.p0.y) * Math.max(0, Math.min(1, u)) + r.top;
+      if (p.y > ry - 0.1 || p.y < ry - 1.4) continue;
+      this.doCrash(r.kind === 'log' ? 'Hit the log! Hold grind to ride it' : r.kind === 'box' ? 'Hit the box! Hold grind to slide it' : 'Hit the rail! Hold grind to ride it');
       return;
     }
   }
@@ -781,7 +800,7 @@ export class Rider {
     if (this.state === 'lift') {
       // seated on a chair: seat point + facing direction come from the lift
       if (this.sitT === undefined) { this.sitT = 1; this.sitE = 1; }
-      this.sitT = Math.min(1, this.sitT + dt / 1.0);
+      this.sitT = Math.min(1, this.sitT + dt / 0.8);
       const e = this.sitE = this.sitT * this.sitT * (3 - 2 * this.sitT);
       const head = Math.atan2(this.liftDir.x, this.liftDir.z);
       const q = new THREE.Quaternion().setFromAxisAngle(UP, head - this.body.rotation.y);
@@ -789,10 +808,9 @@ export class Rider {
       const hip = this.hipC.clone().applyAxisAngle(UP, head);
       const p = this.liftSeat.clone().sub(hip);
       if (e < 1 && this.sitFromPos) {
-        // turn to face up the lift and drop back onto the seat (a little hop up onto it)
+        // the seat comes up behind you: sit back and down onto it
         root.quaternion.slerpQuaternions(this.sitFromQ, q, Math.min(1, e * 1.4));
         root.position.lerpVectors(this.sitFromPos, p, e);
-        root.position.y += Math.sin(Math.PI * e) * 0.15;
       } else { root.quaternion.copy(q); root.position.copy(p); }
       this.pos.copy(root.position);
       return;
@@ -806,7 +824,16 @@ export class Rider {
       root.quaternion.copy(this.crashQ);
     } else {
       const onSnow = this.state === 'ride' || this.state === 'grind';
-      const targetAlign = new THREE.Quaternion().setFromUnitVectors(UP, this.state === 'ride' ? this.normal : UP);
+      // follow the slope down the fall line of your travel, but stay upright across it: riding across a
+      // hill, the board tips onto its uphill edge and your body stays vertical instead of sticking out sideways
+      let alignN = UP;
+      if (this.state === 'ride') {
+        const sx = Math.cos(this.yaw), sz = Math.sin(this.yaw);        // horizontal, across your travel
+        const k = this.normal.x * sx + this.normal.z * sz;
+        alignN = this._alignN || (this._alignN = new THREE.Vector3());
+        alignN.set(this.normal.x - 0.9 * k * sx, this.normal.y, this.normal.z - 0.9 * k * sz).normalize();
+      }
+      const targetAlign = new THREE.Quaternion().setFromUnitVectors(UP, alignN);
       this.alignQ.slerp(targetAlign, 1 - Math.exp(-(onSnow ? 18 : 3) * dt));
       const q = new THREE.Quaternion();
       if (onSnow) {

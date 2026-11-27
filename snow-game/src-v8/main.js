@@ -537,7 +537,7 @@ function tick(dt, now) {
     if (game.mode === 'liftwait') {
       const u = curLift.chairU(chairIdx);
       if (glide) updateGlide(dt);
-      else if (u >= curLift.loadU && u < curLift.loadU + 10) boardChair();
+      else if (u >= curLift.loadU - 0.9 && u < curLift.loadU + 10) boardChair();   // chair comes up behind you: sit back onto it
       rider.updateVisual(dt, inp);
       chase.update(dt, rider);
     }

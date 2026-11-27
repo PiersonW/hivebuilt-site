@@ -101,6 +101,7 @@ export class Npcs {
     this.riders = [];
     for (let i = 0; i < opts.count; i++) {
       const r = new Rider(scene, terrain);
+      r.npc = true;   // other riders don't grind or hit rails
       const npc = { rider: r, active: false, goneT: 0, look: null };
       r.root.visible = false;
       this.riders.push(npc);
