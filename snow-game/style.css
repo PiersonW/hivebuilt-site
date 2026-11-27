@@ -94,3 +94,9 @@ button { font-family: inherit; cursor: pointer; border: 2px solid #fff; color: #
   padding: 8px 16px; border-radius: 10px; text-align: center; font-size: 17px; font-weight: bold; }
 #lift-guide small { font-weight: normal; font-size: 12px; opacity: 0.8; }
 #lift-guide .arrow { color: #ffd23a; font-size: 22px; margin-right: 6px; }
+
+#lift-ui.hide-map #map-panel, #lift-ui.hide-hl #hl-panel { display: none; }
+.toggle { opacity: 0.55; }
+.toggle.on { opacity: 1; background: rgba(255,255,255,0.18); }
+kbd { font-family: inherit; font-size: 10px; border: 1px solid rgba(255,255,255,0.5); border-radius: 3px; padding: 0 3px; margin-left: 3px; opacity: 0.8; }
+@media (max-width: 700px) { #lift-top { flex-wrap: wrap; justify-content: center; white-space: normal; } }

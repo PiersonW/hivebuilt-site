@@ -35,6 +35,16 @@ const PARK = {
   ],
 };
 const CLIFF = { run: 'chute', z: -560, drop: 7 };
+// Natural jumps: snow rolls shaped into the runs (a ramp up, then a quick drop). [run, s along run]
+const NATURAL_JUMPS = [
+  ['main', 260], ['main', 760], ['main', 1180], ['long', 520], ['long', 1100], ['chute', 300], ['chute', 1050],
+  ['cross', 260], ['timber', 280], ['timber', 640], ['ridge', 420], ['ridge', 700],
+];
+// Downed trees near the run edges you can ride like a rail. [run, s, side (-1 left / 1 right), length]
+const LOGS = [
+  ['main', 340, -1, 11], ['main', 900, 1, 10], ['long', 620, 1, 10], ['long', 1000, -1, 12], ['chute', 420, -1, 9],
+  ['cross', 150, 1, 10], ['timber', 450, -1, 11], ['timber', 800, 1, 10], ['ridge', 500, 1, 10],
+];
 const PADS = [
   { x: SUMMIT.x, z: SUMMIT.z - 6, r: 34 },     // summit flat (lift top, start of runs)
   { x: RIDGE_TOP.x, z: RIDGE_TOP.z, r: 22 },  // ridge lift top
@@ -60,7 +70,9 @@ export class Terrain {
     this._buildMesh();
     this._buildKickers();
     this._buildPark();
+    this._buildLogs();
     this._buildTrees();
+    this._bakeShadows();
     this._buildRocks();
     this._buildSigns();
   }
@@ -205,6 +217,21 @@ export class Terrain {
         this.H[q] = src[q] + (sum / ((2 * R + 1) ** 2) - src[q]) * g;
       }
     }
+    // natural jumps: a smooth 14 m ramp up to a 1.8 m lip, then a quick drop back to the run
+    for (const [rid, s0] of NATURAL_JUMPS) {
+      const ri = this.runs.findIndex(r => r.id === rid), run = this.runs[ri];
+      const a = run.at(s0), R = run.hw + 4;
+      const i0 = Math.max(0, Math.floor((a.x - R - this.x0) / CELL)), i1 = Math.min(cols, Math.ceil((a.x + R - this.x0) / CELL));
+      const j0 = Math.max(0, Math.floor((this.z0 - a.z - R) / CELL)), j1 = Math.min(rows, Math.ceil((this.z0 - a.z + R) / CELL));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const q = j * W + i, d = this.runDist[ri][q], u = this.runS[ri][q] - s0;
+        if (d > run.hw || u < -14 || u > 4) continue;
+        const w = 1 - smoothstep(run.hw * 0.55, run.hw, d);
+        const h = u <= 0 ? 1.8 * ((u + 14) / 14) ** 2 : 1.8 * (1 - smoothstep(0, 4, u));
+        this.H[q] += h * w;
+      }
+      run.naturalJumps = (run.naturalJumps || []).concat(s0);
+    }
   }
 
   // Smooth ground height for riding (Catmull-Rom across the grid, so no bumps at triangle edges).
@@ -321,6 +348,18 @@ export class Terrain {
     const { cols, rows } = this, W = cols + 1, H = this.H;
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0, normalMap: this._snowNormalMap(), normalScale: new THREE.Vector2(0.55, 0.55) });
     this.material = mat;
+    // baked shadows (filled in by _bakeShadows once the trees exist): a world-space map that tints shaded snow blue
+    const blank = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat, THREE.UnsignedByteType); blank.needsUpdate = true;
+    this.bakedUniforms = { shadowTex: { value: blank }, shadowArea: { value: new THREE.Vector4(WORLD.x0, WORLD.zTop, 1, 1) } };
+    const U = this.bakedUniforms;
+    mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec4 shadowArea;\nvarying vec2 vBakedUv;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvec4 bwp = modelMatrix * vec4(transformed, 1.0);\nvBakedUv = vec2((bwp.x - shadowArea.x) / shadowArea.z, (shadowArea.y - bwp.z) / shadowArea.w);');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D shadowTex;\nvarying vec2 vBakedUv;')
+        .replace('#include <color_fragment>', '#include <color_fragment>\nfloat baked = texture2D(shadowTex, vBakedUv).r;\ndiffuseColor.rgb *= mix(vec3(1.0), vec3(0.34, 0.42, 0.64), baked);');
+    };
+    mat.customProgramCacheKey = () => 'snow-baked-shadows';
     const snow = new THREE.Color(0.93, 0.955, 0.985), powder = new THREE.Color(0.86, 0.9, 0.97), groomed = new THREE.Color(0.975, 0.98, 0.99);
     const rock = new THREE.Color(0.38, 0.36, 0.35), rockLight = new THREE.Color(0.55, 0.52, 0.49), c = new THREE.Color();
     const CH = 64;
@@ -449,6 +488,103 @@ export class Terrain {
     this.scene.add(banner);
   }
 
+  // Downed trees along the run edges: ride them like a rail.
+  _buildLogs() {
+    const bark = new THREE.MeshStandardMaterial({ color: 0x5b4030, roughness: 0.95, flatShading: true });
+    const wood = new THREE.MeshStandardMaterial({ color: 0xb08a5a, roughness: 0.9, flatShading: true });
+    const snowM = new THREE.MeshStandardMaterial({ color: 0xf2f6fb, roughness: 0.9 });
+    const R = 0.28;
+    for (const [rid, sAt, side, len] of LOGS) {
+      const run = this.runById[rid], a = run.at(sAt);
+      const off = side * (run.hw - 4);
+      // angled ~20 degrees in toward the run so you can ride onto it
+      const ang = -side * 0.35, ca = Math.cos(ang), sa = Math.sin(ang);
+      const dx = a.tx * ca - a.tz * sa, dz = a.tx * sa + a.tz * ca;
+      const x0 = a.x - a.tz * off, z0 = a.z + a.tx * off, x1 = x0 + dx * len, z1 = z0 + dz * len;
+      const p0 = new THREE.Vector3(x0, this.terrainHeight(x0, z0) + 2 * R * 0.9, z0);
+      const p1 = new THREE.Vector3(x1, this.terrainHeight(x1, z1) + 2 * R * 0.9, z1);
+      const d = p1.clone().sub(p0), L = d.length(), dir3 = d.clone().normalize();
+      const dirH = new THREE.Vector3(d.x, 0, d.z); const lenH = dirH.length(); dirH.normalize();
+      this.rails.push({ p0, p1, dir3, dirH, len: L, lenH, kind: 'log', halfW: 0.2, top: 0.02, snapBelow: 0.65 });
+      const g = new THREE.Group();
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.85, R, L, 7), bark); trunk.rotation.x = Math.PI / 2; g.add(trunk);
+      const snowCap = new THREE.Mesh(new THREE.BoxGeometry(R * 1.1, 0.06, L * 0.9), snowM); snowCap.position.y = R * 0.95; g.add(snowCap);
+      const roots = new THREE.Mesh(new THREE.CylinderGeometry(R * 2.6, R * 2.2, 0.35, 8), wood); roots.rotation.x = Math.PI / 2; roots.position.z = -L / 2; g.add(roots);
+      for (const t of [-0.2, 0.15, 0.35]) {        // broken branch stubs
+        const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.08, 0.7, 5), bark);
+        stub.position.set(R * 0.9, 0.1, L * t); stub.rotation.z = -1.1; g.add(stub);
+      }
+      const mid = p0.clone().lerp(p1, 0.5); mid.y -= R * 0.9;
+      g.position.copy(mid);
+      g.rotation.set(0, Math.atan2(dir3.x, dir3.z), 0, 'YXZ'); g.rotateX(-Math.asin(dir3.y));
+      g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      this.scene.add(g);
+    }
+  }
+
+  // Shadows for the whole mountain, worked out once (the sun doesn't move): trees and ridges
+  // darken the snow with a cool blue shade. Live shadows near the rider are added on top by the renderer.
+  _bakeShadows() {
+    const sun = (this.opts.sunDir || new THREE.Vector3(-0.5, 0.5, 0.4)).clone().normalize();
+    const RES = this.opts.shadowRes || 1.0, w = Math.ceil((WORLD.x1 - WORLD.x0) / RES), h = Math.ceil((WORLD.zTop - WORLD.zBot) / RES);
+    const shade = new Float32Array(w * h);
+    const sx = -sun.x, sz = -sun.z, sl = Math.hypot(sx, sz) || 1;
+    const shx = sx / sl, shz = sz / sl;                       // shadows fall this way on the ground
+    const tanE = sun.y / Math.hypot(sun.x, sun.z);            // sun height per meter toward the sun
+    // ridges: march toward the sun from each grid point
+    const { cols, rows } = this, W = cols + 1;
+    const self = new Float32Array(W * (rows + 1));
+    for (let j = 0; j <= rows; j++) for (let i = 0; i <= cols; i++) {
+      const q = j * W + i, x = this.x0 + i * CELL, z = this.z0 - j * CELL, y = this.H[q] + 0.3;
+      let lit = 1;
+      for (let t = 6; t < 360; t += 6) {
+        const xx = x - shx * t, zz = z - shz * t;
+        if (xx < WORLD.x0 || xx > WORLD.x1 || zz > WORLD.zTop || zz < WORLD.zBot) break;
+        const above = this.H[this._q(xx, zz)] - (y + t * tanE);
+        if (above > 0) { lit = 0; break; }
+        if (above > -1.5) lit = Math.min(lit, -above / 1.5);
+      }
+      self[q] = 1 - lit;
+    }
+    for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+      const x = WORLD.x0 + px * RES, z = WORLD.zTop - py * RES;
+      const gi = (x - this.x0) / CELL, gj = (this.z0 - z) / CELL, i = Math.min(cols - 1, Math.floor(gi)), j = Math.min(rows - 1, Math.floor(gj));
+      const fi = gi - i, fj = gj - j, q = j * W + i;
+      shade[py * w + px] = (self[q] * (1 - fi) + self[q + 1] * fi) * (1 - fj) + (self[q + W] * (1 - fi) + self[q + W + 1] * fi) * fj;
+    }
+    // trees: a cone-shaped shadow stretched away from the sun
+    const stretch = 1 / tanE;
+    for (const t of this.trees) {
+      if (t.kind !== 'tree') continue;
+      const size = t.h / 6.5, Ls = t.h * stretch, crown = 1.9 * size;
+      const minX = Math.min(t.x, t.x + shx * Ls) - crown - 1, maxX = Math.max(t.x, t.x + shx * Ls) + crown + 1;
+      const minZ = Math.min(t.z, t.z + shz * Ls) - crown - 1, maxZ = Math.max(t.z, t.z + shz * Ls) + crown + 1;
+      for (let z = maxZ; z >= minZ; z -= RES) for (let x = minX; x <= maxX; x += RES) {
+        const px = Math.round((x - WORLD.x0) / RES), py = Math.round((WORLD.zTop - z) / RES);
+        if (px < 0 || py < 0 || px >= w || py >= h) continue;
+        const dx = x - t.x, dz = z - t.z, along = dx * shx + dz * shz, lat = Math.abs(-dx * shz + dz * shx);
+        if (along < -1 || along > Ls + 1) continue;
+        const hgt = along / stretch;                                  // height on the tree that casts this spot
+        const r = hgt < 1.4 * size ? 0.25 * size + 0.6 : crown * Math.max(0, 1 - (hgt - 1.4 * size) / (t.h - 1.4 * size)) + 0.3;
+        const v = 1 - smoothstep(r - 0.5, r + 0.5, lat);
+        const k = py * w + px;
+        if (v > shade[k]) shade[k] = v;
+      }
+    }
+    // soften edges (one 3x3 pass)
+    const out = new Uint8Array(w * h);
+    for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+      let sum = 0, n = 0;
+      for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) { const xx = px + a, yy = py + b; if (xx >= 0 && yy >= 0 && xx < w && yy < h) { sum += shade[yy * w + xx]; n++; } }
+      out[py * w + px] = Math.min(255, (sum / n) * 255);
+    }
+    const tex = new THREE.DataTexture(out, w, h, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
+    this.shadowTex = tex;
+    this.bakedUniforms.shadowTex.value = tex;
+    this.bakedUniforms.shadowArea.value.set(WORLD.x0, WORLD.zTop, w * RES, h * RES);
+  }
+
   _kickerMesh(k, prof, N, mat, lipMat) {
     const verts = [], uvs = [];
     const P = (u, v, hOff) => {
@@ -549,7 +685,7 @@ export class Terrain {
         im.setColorAt(i, tint);
         this.trees.push({ x, z, y, r: 0.3 * size, h: 6.5 * size, kind: 'tree', mesh: im, i });
       });
-      im.castShadow = true; im.receiveShadow = true;
+      im.castShadow = false; im.receiveShadow = true;
       im.computeBoundingSphere();
       this.scene.add(im);
       this.treeMeshes.push(im);

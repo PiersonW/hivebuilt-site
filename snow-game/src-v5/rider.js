@@ -14,21 +14,22 @@ export const TUNE = {
   brakeGrip: 2.2,
   carveScrub: 0.12,       // share of speed lost per radian the carve turns you
   snowFriction: 0.045,
-  drag: 0.0050,           // normal stance air drag (v^2)
-  tuckDrag: 0.0026,
+  drag: 0.0078,           // normal stance air drag (v^2): straight down the steep middle tops out near 50 mph
+  tuckDrag: 0.0024,       // low: a straight tuck keeps building toward 60-65 mph
   standDrag: 0.02,
   brakeDecel: 11,
   jumpBase: 3.6,          // m/s pop with no charge
   jumpCharge: 3.6,        // extra pop at full charge
   chargeTime: 0.55,
   spinRate: 7.6,          // rad/s in the air
-  flipRate: 7.2,
+  flipRate: 5.2,          // rad/s (a full flip takes about 1.2 s)
   landSpinTol: 1.0,       // rad (~57 deg) off the travel line and you crash
   landFlipTol: 1.25,      // rad (~72 deg) off upright and you crash
   phantomTime: 0.75,
   airGravity: 0.85,       // a little floaty in the air (arcade)
+  stick: 0.0035,          // how hard the board holds the snow over rolls (higher = fewer little hops)
   maxLaunch: 7.5,         // m/s off a kicker, measured away from the landing slope
-  maxSpeed: 26.5,         // m/s (~59 mph): above this the snow starts holding you back
+  maxSpeed: 28,           // m/s (~63 mph): above this the snow starts holding you back
   topSpeed: 65 / 2.237,   // hard cap: 65 mph
   crashTime: 4,           // longest tumble before getting up
   getupTime: 1.3,         // seconds to stand back up
@@ -173,7 +174,7 @@ export class Rider {
     if (phantom) { hipH = 0.85; lean = 0.25; feetLift = 0.35; }
     if (crashing) { hipH = 0.95; lean = -0.2; }
     const seated = this.state === 'lift';
-    if (seated) { hipH = 0.5; lean = -0.12; }
+    if (seated) { const e = this.sitE === undefined ? 1 : this.sitE; hipH = 0.92 - 0.42 * e; lean = 0.25 - 0.37 * e; }
     const gettingUp = this.state === 'crash' && this.getupT >= 0;
     const gu = gettingUp ? this.getupT : 0;
     if (gettingUp) { hipH = 0.4 + 0.5 * gu; lean = 0.9 * (1 - gu) + 0.15; }
@@ -187,8 +188,9 @@ export class Rider {
     bg.position.set(0, P.boardLift, 0);
     bg.rotation.set(P.boardRX, 0, P.boardRZ);
     if (seated) {
-      // board hangs off the feet in front of the seat
-      const v = new THREE.Vector3(0, 0.02, 0.45).applyAxisAngle(UP, this.body.rotation.y);
+      // board swings up in front of the seat as you sit
+      const e = this.sitE === undefined ? 1 : this.sitE;
+      const v = new THREE.Vector3(0, 0.02, 0.45 * e).applyAxisAngle(UP, this.body.rotation.y);
       bg.position.copy(v);
       bg.rotation.set(0, 0, 0);
     }
@@ -282,6 +284,13 @@ export class Rider {
   }
 
   get speed() { return this.vel.length(); }
+
+  // Start sitting down onto a chair: blends from standing in the lift line to seated over ~1 s.
+  beginSit() {
+    this.sitT = 0; this.sitE = 0;
+    this.sitFromPos = this.root.position.clone();
+    this.sitFromQ = this.root.quaternion.clone();
+  }
 
   // Sit on a chairlift seat (call every frame while riding the lift).
   sitAt(seat, dir) {
@@ -386,7 +395,7 @@ export class Rider {
       this.vel.addScaledVector(n, pop);
       this.pos.copy(next); this.pos.y = Math.max(next.y, gh) + 0.02;
       this._takeoff(true);
-    } else if (next.y - gh > 1.6 * 0.5 * G * n.y * dt * dt + 0.0004) {
+    } else if (next.y - gh > 1.6 * 0.5 * G * n.y * dt * dt + T.stick) {
       // the ground curves away faster than gravity can hold us on it (lips, cliffs, sharp crests)
       this.pos.copy(next);
       this._takeoff(false);
@@ -396,7 +405,7 @@ export class Rider {
       const s0 = this.vel.length();
       this.vel.addScaledVector(nn, -this.vel.dot(nn));
       const s1 = this.vel.length();
-      if (s1 > 1e-4) this.vel.multiplyScalar(s0 / s1 * 0.999);
+      if (s1 > 1e-4) this.vel.multiplyScalar(s0 / s1);   // follow the ground without losing speed
     }
 
     // spray amount for particles
@@ -598,7 +607,7 @@ export class Rider {
       if (lat > r.halfW + 0.35) continue;
       const ry = r.p0.y + (r.p1.y - r.p0.y) * u;
       const dy = p.y - ry;
-      if (dy < -0.45 || dy > 0.75) continue;
+      if (dy < -(r.snapBelow || 0.45) || dy > 0.75) continue;
       const along = (v.x * r.dirH.x + v.z * r.dirH.z) / vh;
       if (Math.abs(along) < 0.6) continue;
       this._startGrind(r, u, along);
@@ -636,7 +645,9 @@ export class Rider {
     this.vel.copy(r.dir3).multiplyScalar(this.railV);
     this.crouch = damp(this.crouch, 0.35, 8, dt); this.lean = damp(this.lean, 0, 8, dt);
     this.brakeAmt = 0; this.spray = 0;
-    const name = r.kind === 'box' ? (this.boardslide ? 'Box Slide' : 'Box 50-50') : (this.boardslide ? 'Boardslide' : '50-50');
+    const name = r.kind === 'box' ? (this.boardslide ? 'Box Slide' : 'Box 50-50')
+      : r.kind === 'log' ? (this.boardslide ? 'Log Slide' : 'Log Ride')
+      : (this.boardslide ? 'Boardslide' : '50-50');
     this.events.push({ type: 'grind', name, dt });
     // pop off with a jump, or ride off the end
     if (input.jump) this.charge = Math.min(1, this.charge + dt / TUNE.chargeTime);
@@ -655,11 +666,20 @@ export class Rider {
     const root = this.root;
     if (this.state === 'lift') {
       // seated on a chair: seat point + facing direction come from the lift
+      if (this.sitT === undefined) { this.sitT = 1; this.sitE = 1; }
+      this.sitT = Math.min(1, this.sitT + dt / 1.0);
+      const e = this.sitE = this.sitT * this.sitT * (3 - 2 * this.sitT);
       const head = Math.atan2(this.liftDir.x, this.liftDir.z);
-      root.quaternion.setFromAxisAngle(UP, head - this.body.rotation.y);
+      const q = new THREE.Quaternion().setFromAxisAngle(UP, head - this.body.rotation.y);
       this._updatePose(dt, input);
       const hip = this.hipC.clone().applyAxisAngle(UP, head);
-      root.position.copy(this.liftSeat).sub(hip);
+      const p = this.liftSeat.clone().sub(hip);
+      if (e < 1 && this.sitFromPos) {
+        // turn to face up the lift and drop back onto the seat (a little hop up onto it)
+        root.quaternion.slerpQuaternions(this.sitFromQ, q, Math.min(1, e * 1.4));
+        root.position.lerpVectors(this.sitFromPos, p, e);
+        root.position.y += Math.sin(Math.PI * e) * 0.15;
+      } else { root.quaternion.copy(q); root.position.copy(p); }
       this.pos.copy(root.position);
       return;
     }

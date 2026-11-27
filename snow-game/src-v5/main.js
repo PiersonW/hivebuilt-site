@@ -47,7 +47,7 @@ const LIFTS = [
   { name: 'Summit Express', bottom: new THREE.Vector3(LIFT_BOTTOMS.express.x, 0, LIFT_BOTTOMS.express.z), top: new THREE.Vector3(EXPRESS_TOP.x, 0, EXPRESS_TOP.z), speed: 13 },
   { name: 'Ridge Lift', bottom: new THREE.Vector3(LIFT_BOTTOMS.ridge.x, 0, LIFT_BOTTOMS.ridge.z), top: new THREE.Vector3(RIDGE_TOP.x, 0, RIDGE_TOP.z + 6), speed: 10 },
 ];
-const terrain = new Terrain(scene, { treeSpacing: LOW_GFX ? 12 : 9.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
+const terrain = new Terrain(scene, { sunDir: SUN_DIR, shadowRes: LOW_GFX ? 1.5 : 1.0, treeSpacing: LOW_GFX ? 12 : 9.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
 buildRange(scene, terrain);
 buildLodge(scene, terrain, -40, BASE_Z - 68);
 for (const dx of [-9.5, 0, 9.5]) terrain.addObstacle(-40 + dx, BASE_Z - 68, 6.5, 12, 'lodge');
@@ -64,6 +64,18 @@ const tricks = new TrickTracker();
 const input = new Input();
 const chase = new ChaseCam(camera, terrain);
 const hud = new Hud();
+
+// soft dark spot under the rider when live shadows are off (Xbox / low graphics)
+const blob = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), grd = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(20,30,60,0.55)'); grd.addColorStop(1, 'rgba(20,30,60,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.8), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; m.renderOrder = 1; m.visible = LOW_GFX;
+  scene.add(m);
+  return m;
+})();
 
 // ---------- snow spray particles ----------
 const MAXP = 600;
@@ -225,8 +237,11 @@ function updateLiftGuide() {
   liftGuideEl.classList.remove('hidden');
 }
 
+let camBlend = null;   // eases the camera from the lift line over to the chair view
 function boardChair() {
   game.mode = 'lift';
+  rider.beginSit();
+  camBlend = { t: 0, pos: camera.position.clone(), quat: camera.quaternion.clone() };
   // look out over the run: toward the run side (+p) and back downhill
   const d = curLift.p.clone().multiplyScalar(1).addScaledVector(curLift.f, -0.9);
   liftCam.yaw = Math.atan2(d.x, d.z); liftCam.pitch = -0.42;
@@ -280,6 +295,22 @@ function updateReplayBar() {
 }
 
 document.getElementById('btn-skip').onclick = () => skipLift();
+// show / hide the trail map and the highlights panel (remembered between visits)
+const panelPref = (() => { try { return JSON.parse(localStorage.getItem('snowPanels') || '{}'); } catch { return {}; } })();
+function applyPanels() {
+  liftEl.classList.toggle('hide-map', panelPref.map === false);
+  liftEl.classList.toggle('hide-hl', panelPref.hl === false);
+  document.getElementById('btn-map').classList.toggle('on', panelPref.map !== false);
+  document.getElementById('btn-hl').classList.toggle('on', panelPref.hl !== false);
+}
+function togglePanel(which) {
+  panelPref[which] = panelPref[which] === false;
+  try { localStorage.setItem('snowPanels', JSON.stringify(panelPref)); } catch {}
+  applyPanels();
+}
+document.getElementById('btn-map').onclick = () => togglePanel('map');
+document.getElementById('btn-hl').onclick = () => togglePanel('hl');
+applyPanels();
 document.getElementById('replay-back').onclick = () => stopReplay();
 document.getElementById('replay-slow').onclick = () => { replayer.slow = !replayer.slow; updateReplayBar(); };
 document.getElementById('replay-camtoggle').onclick = () => { replayer.camMode = replayer.camMode === 'orbit' ? 'follow' : 'orbit'; updateReplayBar(); };
@@ -295,14 +326,19 @@ function liftInput(inp, dt) {
   }
   if (tap('Enter', 'NumpadEnter') || pad(BTN.MENU)) { skipLift(); return; }
   if (tap('Escape') || pad(BTN.VIEW)) { liftEl.classList.add('hidden'); showMenu(); return; }
+  if (tap('KeyM') || pad(BTN.LB)) togglePanel('map');
+  if (tap('KeyH') || pad(BTN.RB)) togglePanel('hl');
   const n = recorder.highlights.length;
   for (let i = 0; i < n; i++) if (tap(`Digit${i + 1}`)) playHighlight(i);
-  if (n && (pad(BTN.DOWN) || tap('ArrowDown'))) { hlSel = (hlSel + 1) % n; renderHighlights(); }
-  if (n && (pad(BTN.UP) || tap('ArrowUp'))) { hlSel = (hlSel + n - 1) % n; renderHighlights(); }
+  if (n && pad(BTN.DOWN)) { hlSel = (hlSel + 1) % n; renderHighlights(); }
+  if (n && pad(BTN.UP)) { hlSel = (hlSel + n - 1) % n; renderHighlights(); }
   if (n && pad(BTN.A)) playHighlight(hlSel);
-  // look around
-  liftCam.yaw -= inp.mouseX * 0.005 + inp.lookX * 2.2 * dt;
-  liftCam.pitch = Math.max(-1.2, Math.min(0.6, liftCam.pitch - inp.mouseY * 0.004 - inp.lookY * 1.8 * dt));
+  // look around: mouse drag, right stick, arrow keys / WASD
+  const k = (c) => input.keys.has(c);
+  const keyX = (k('ArrowRight') || k('KeyD') ? 1 : 0) - (k('ArrowLeft') || k('KeyA') ? 1 : 0);
+  const keyY = (k('ArrowDown') || k('KeyS') ? 1 : 0) - (k('ArrowUp') || k('KeyW') ? 1 : 0);
+  liftCam.yaw -= inp.mouseX * 0.005 + (inp.lookX + keyX) * 1.8 * dt;
+  liftCam.pitch = Math.max(-1.2, Math.min(0.6, liftCam.pitch - inp.mouseY * 0.004 - (inp.lookY + keyY) * 1.4 * dt));
 }
 
 function updateLiftCamera() {
@@ -311,11 +347,19 @@ function updateLiftCamera() {
   const d = new THREE.Vector3(Math.sin(liftCam.yaw) * Math.cos(liftCam.pitch), Math.sin(liftCam.pitch), Math.cos(liftCam.yaw) * Math.cos(liftCam.pitch));
   camera.position.copy(eye);
   camera.lookAt(eye.add(d));
-  if (Math.abs(camera.fov - 70) > 0.1) { camera.fov = 70; camera.updateProjectionMatrix(); }
+  if (camBlend) {
+    camBlend.t = Math.min(1, camBlend.t + dtLast / 1.8);
+    const e = camBlend.t * camBlend.t * (3 - 2 * camBlend.t);
+    camera.position.lerpVectors(camBlend.pos, camera.position.clone(), e);
+    camera.quaternion.slerpQuaternions(camBlend.quat, camera.quaternion.clone(), e);
+    if (camBlend.t >= 1) camBlend = null;
+  }
+  if (Math.abs(camera.fov - 70) > 0.1) { camera.fov += (70 - camera.fov) * 0.1; camera.updateProjectionMatrix(); }
 }
 
 function showMenu() {
   game.mode = 'menu';
+  camBlend = null;
   glide = null;
   replayer.stop();
   liftEl.classList.add('hidden');
@@ -390,7 +434,9 @@ window.__game.advance = (seconds, fps = 60) => {
   for (let i = 0; i < Math.round(seconds * fps); i++) { last += 1000 / fps; tick(1 / fps, last); }
 };
 
+let dtLast = 1 / 60;
 function tick(dt, now) {
+  dtLast = dt;
   fpsT += dt; fpsN++;
   if (fpsT > 1) { window.__fps = Math.round(fpsN / fpsT); fpsT = 0; fpsN = 0; }
 
@@ -472,7 +518,11 @@ function tick(dt, now) {
       rider.updateVisual(dt, inp);
       const left = curLift.timeToTop(chairIdx);
       document.getElementById('lift-status').textContent = replayer.active ? 'Lift paused while you watch' : `${Math.ceil(left)} s to the top`;
-      if (replayer.active) { replayer.update(dt); replayer.updateCamera(camera, dt, { x: inp.lookX + inp.mouseX * 0.4, y: inp.lookY + inp.mouseY * 0.4 }, terrain); }
+      if (replayer.active) {
+        const k = (c) => input.keys.has(c);
+        const kx = (k('ArrowRight') || k('KeyD') ? 1 : 0) - (k('ArrowLeft') || k('KeyA') ? 1 : 0), ky = (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') || k('KeyW') ? 1 : 0);
+        replayer.update(dt); replayer.updateCamera(camera, dt, { x: inp.lookX + kx + inp.mouseX * 0.4, y: inp.lookY + ky + inp.mouseY * 0.4 }, terrain);
+      }
       else updateLiftCamera();
       if (st.u >= curLift.unloadU && st.u < curLift.unloadU + 15) unload();
     }
@@ -485,6 +535,12 @@ function tick(dt, now) {
   const fogWant = game.mode === 'lift' && !replayer.active ? 0.00022 : 0.00042;
   scene.fog.density += (fogWant - scene.fog.density) * Math.min(1, dt * 2);
 
+  if (LOW_GFX) {
+    const gy = terrain.heightAt(rider.pos.x, rider.pos.z), above = rider.pos.y - gy;
+    blob.visible = rider.state !== 'lift' && above < 6;
+    blob.position.set(rider.pos.x, gy + 0.05, rider.pos.z);
+    blob.scale.setScalar(1 + above * 0.15); blob.material.opacity = Math.max(0, 1 - above / 6);
+  }
   updateParticles(dt);
   // shadow box follows the rider (or the replay)
   const focus = replayer.active ? replayer.pos : rider.pos;
