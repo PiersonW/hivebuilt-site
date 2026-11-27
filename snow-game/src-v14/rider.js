@@ -931,7 +931,18 @@ export class Rider {
     const W = this.terrain;
     const t = W.treeNear(this.pos.x, this.pos.z);
     const gh = W.heightAt(this.pos.x, this.pos.z);
-    if (t && this.pos.y < t.y + t.h) { this._endFlight(); this.doCrash(t.kind === 'tree' ? 'Flew into a tree!' : 'Flew into something!'); return; }
+    if (t && this.pos.y < t.y + t.h) {
+      if (this.chute) {
+        // under the parachute you just brush past: slide round the trunk and lose a little speed
+        let dx = this.pos.x - t.x, dz = this.pos.z - t.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+        this.pos.x = t.x + dx * (t.r + 0.5); this.pos.z = t.z + dz * (t.r + 0.5);
+        const vn = this.vel.x * dx + this.vel.z * dz;
+        if (vn < 0) { this.vel.x -= dx * vn; this.vel.z -= dz * vn; }
+        this.vel.x *= 0.7; this.vel.z *= 0.7;
+        if (Math.hypot(this.vel.x, this.vel.z) > 0.3) this.flyYaw = headingOf(this.vel);
+        else this.flyYaw = Math.atan2(dx, -dz);
+      } else { this._endFlight(); this.doCrash(t.kind === 'tree' ? 'Flew into a tree!' : 'Flew into something!'); return; }
+    }
     if (this.pos.y <= gh + 0.05) {
       this.pos.y = gh;
       const underChute = this.chute;
