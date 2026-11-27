@@ -50,6 +50,7 @@ const LIFTS = [
 const terrain = new Terrain(scene, { treeSpacing: LOW_GFX ? 9.5 : 6.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
 buildRange(scene, terrain);
 buildLodge(scene, terrain, -40, BASE_Z - 68);
+for (const dx of [-9.5, 0, 9.5]) terrain.addObstacle(-40 + dx, BASE_Z - 68, 6.5, 12, 'lodge');
 const lifts = LIFTS.map(l => new Chairlift(scene, terrain, l.bottom, l.top, { name: l.name, speed: l.speed }));
 let curLift = lifts[0];
 const trailMap = new TrailMap(terrain, lifts);
@@ -105,13 +106,12 @@ function updateParticles(dt) {
 
 // ---------- game state ----------
 const menuEl = document.getElementById('menu');
-const finishEl = document.getElementById('finish');
 const game = {
-  mode: 'menu',      // menu | run | finish | liftwait | lift
+  mode: 'menu',      // menu | run | liftwait | lift
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, recorder, replayer, startLift: (i) => startLift(lifts[i]) }; // handy for debugging in the console
+window.__game = { IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -133,8 +133,8 @@ function startRun(at = null, yaw = 0) {
   replayer.stop();
   chase.snap(rider);
   menuEl.classList.add('hidden');
-  finishEl.classList.add('hidden');
   liftEl.classList.add('hidden');
+  glide = null;
   hud.show(true);
   hud.clearPopups();
 }
@@ -145,21 +145,76 @@ const replayEl = document.getElementById('replay-ui');
 const liftCam = { yaw: 0, pitch: -0.3 };
 let chairIdx = 0, hlSel = 0;
 
-function startLift(l = lifts[0]) {
+// Get on lift `l`. With glide, the rider slides from where they are into the loading spot first.
+let glide = null;
+function startLift(l = lifts[0], doGlide = false) {
   curLift = l;
   document.querySelector('#lift-ui .lift-name').textContent = '🚡 ' + l.name;
   game.mode = 'liftwait';
-  finishEl.classList.add('hidden');
   hud.show(false);
   liftEl.classList.remove('hidden');
   replayEl.classList.add('hidden');
-  rider.reset(curLift.loadPoint, Math.atan2(curLift.f.x, -curLift.f.z));
+  const loadYaw = Math.atan2(curLift.f.x, -curLift.f.z);
+  if (doGlide) {
+    glide = { from: rider.pos.clone(), yaw0: rider.yaw, yaw1: loadYaw, t: 0 };
+    rider.reset(rider.pos.clone(), rider.yaw);
+  } else {
+    glide = null;
+    rider.reset(curLift.loadPoint, loadYaw);
+    chase.snap(rider);
+  }
   rider.vel.set(0, 0, 0);
-  chase.snap(rider);
   chairIdx = curLift.nextChairToLoad().index;
   hlSel = 0;
   renderHighlights();
-  document.getElementById('lift-status').textContent = 'Wait for the chair…';
+  document.getElementById('lift-status').textContent = doGlide ? 'Getting in line…' : 'Wait for the chair…';
+}
+
+function updateGlide(dt) {
+  glide.t = Math.min(1, glide.t + dt / 1.6);
+  const e = glide.t * glide.t * (3 - 2 * glide.t);
+  const p = glide.from.clone().lerp(curLift.loadPoint, e);
+  p.y = terrain.heightAt(p.x, p.z);
+  let dy = glide.yaw1 - glide.yaw0; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
+  rider.pos.copy(p); rider.yaw = glide.yaw0 + dy * e;
+  rider.vel.set(Math.sin(rider.yaw), 0, -Math.cos(rider.yaw)).multiplyScalar(2 * (1 - e) + 0.01);
+  terrain.normalAt(p.x, p.z, rider.normal);
+  rider.brakeAmt = 1 - e;
+  if (glide.t >= 1) {
+    glide = null; rider.brakeAmt = 0; rider.vel.set(0, 0, 0);
+    chairIdx = curLift.nextChairToLoad().index;
+    document.getElementById('lift-status').textContent = 'Wait for the chair…';
+  }
+}
+
+// Riding into a lift line ends the run.
+function endRun(l) {
+  recorder.finishRun();
+  const rows = [
+    ['Time', fmtTime(game.time)],
+    ['Score', game.score.toLocaleString()],
+    ['Runs', runsSummary() || '—'],
+    ['Best trick', game.bestTrick ? `${game.bestTrick.name} (${game.bestTrick.points.toLocaleString()})` : '—'],
+    ['Top speed', `${Math.round(rider.topSpeed * 2.237)} mph`],
+    ['Crashes', game.crashes],
+  ];
+  document.getElementById('run-summary').innerHTML = '<div class="panel-title">Last run</div><table>' + rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('') + '</table>';
+  startLift(l, true);
+}
+
+// Near the base: which lift is closest, how far, and which way (relative to the camera).
+const liftGuideEl = document.getElementById('lift-guide');
+function updateLiftGuide() {
+  if (rider.pos.z > BASE_Z + 160) { liftGuideEl.classList.add('hidden'); return; }
+  let best = null, bd = Infinity;
+  for (const l of lifts) { const d = Math.hypot(l.loadPoint.x - rider.pos.x, l.loadPoint.z - rider.pos.z); if (d < bd) { bd = d; best = l; } }
+  const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+  const toL = new THREE.Vector3(best.loadPoint.x - rider.pos.x, 0, best.loadPoint.z - rider.pos.z);
+  const ang = Math.atan2(fwd.x * toL.z - fwd.z * toL.x, fwd.x * toL.x + fwd.z * toL.z);   // + = to the right
+  const arrows = ['⬆', '↗', '➡', '↘', '⬇', '↙', '⬅', '↖'];
+  const k = ((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8;
+  liftGuideEl.innerHTML = `<span class="arrow">${arrows[k]}</span> 🚡 ${best.name} · ${Math.round(bd)} m<br><small>Ride into the lift line to head back up</small>`;
+  liftGuideEl.classList.remove('hidden');
 }
 
 function boardChair() {
@@ -253,10 +308,10 @@ function updateLiftCamera() {
 
 function showMenu() {
   game.mode = 'menu';
+  glide = null;
   replayer.stop();
   liftEl.classList.add('hidden');
   menuEl.classList.remove('hidden');
-  finishEl.classList.add('hidden');
   hud.show(false);
   rider.reset(terrain.spawnPoint(), 0);
   chase.snap(rider);
@@ -269,23 +324,6 @@ function runsSummary() {
   return out.join(' → ');
 }
 
-function finishRun() {
-  game.mode = 'finish';
-  recorder.finishRun();
-  hud.show(false);
-  const rows = [
-    ['Time', fmtTime(game.time)],
-    ['Score', game.score.toLocaleString()],
-    ['Tricks landed', game.tricksLanded],
-    ['Best trick', game.bestTrick ? `${game.bestTrick.name} (${game.bestTrick.points.toLocaleString()})` : '—'],
-    ['Runs', runsSummary() || '—'],
-    ['Top speed', `${Math.round(rider.topSpeed * 2.237)} mph`],
-    ['Crashes', game.crashes],
-  ];
-  document.getElementById('summary').innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
-  finishEl.classList.remove('hidden');
-}
-
 // full screen (needs a real click; on Xbox use the cursor, or the View button's full screen option)
 const fsBtn = document.getElementById('btn-fullscreen');
 fsBtn.onclick = () => { try { document.documentElement.requestFullscreen(); } catch {} };
@@ -295,9 +333,6 @@ const padHelpEl = document.getElementById('pad-help');
 document.getElementById('btn-regular').onclick = () => setStance(true);
 document.getElementById('btn-goofy').onclick = () => setStance(false);
 document.getElementById('btn-start').onclick = () => startRun();
-document.getElementById('btn-restart').onclick = () => startRun();
-document.getElementById('btn-lift').onclick = () => startLift(lifts[0]);
-document.getElementById('btn-lift2').onclick = () => startLift(lifts[1]);
 
 function handleEvents() {
   for (const ev of rider.events) {
@@ -407,25 +442,23 @@ function tick(dt, now) {
       game.runsVisited[game.runsVisited.length - 1].t += dt;
     }
 
-    if (rider.pos.z <= BASE_Z && rider.state !== 'crash') finishRun();
-  } else if (game.mode === 'finish') {
-    if (inp.confirmPressed) startLift(lifts[0]);
-    else if (inp.padTaps.has(BTN.X) || inp.taps.has('Digit2')) startLift(lifts[1]);
-    else if (inp.restartPressed) startRun();
-    else if (inp.menuPressed) showMenu();
-    // let the rider coast through the runout behind the summary
-    acc += dt;
-    while (acc >= STEP) { rider.step(STEP, { steer: 0, up: false, down: false, jump: false, brake: rider.speed > 3, grab: null }); acc -= STEP; }
-    rider.events.length = 0;
-    rider.updateVisual(dt, {});
-    chase.update(dt, rider);
+    // ride into a lift line to end the run and head back up
+    if (rider.state === 'ride') {
+      for (const l of lifts) {
+        const dl = Math.hypot(rider.pos.x - l.loadPoint.x, rider.pos.z - l.loadPoint.z);
+        const ds = Math.hypot(rider.pos.x - l.towers[0].x, rider.pos.z - l.towers[0].z);
+        if (dl < 11 || ds < 9) { endRun(l); break; }
+      }
+    }
+    updateLiftGuide();
   }
 
   else if (game.mode === 'liftwait' || game.mode === 'lift') {
     liftInput(inp, dt);
     if (game.mode === 'liftwait') {
       const u = curLift.chairU(chairIdx);
-      if (u >= curLift.loadU && u < curLift.loadU + 10) boardChair();
+      if (glide) updateGlide(dt);
+      else if (u >= curLift.loadU && u < curLift.loadU + 10) boardChair();
       rider.updateVisual(dt, inp);
       chase.update(dt, rider);
     }

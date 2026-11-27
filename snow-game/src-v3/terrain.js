@@ -48,7 +48,6 @@ export class Terrain {
     this._buildTrees();
     this._buildRocks();
     this._buildSigns();
-    this._buildFinishGates();
   }
 
   // ---------- shape of the mountain ----------
@@ -74,8 +73,21 @@ export class Terrain {
     return this.E[i] + (this.E[i + 1] - this.E[i]) * (f - i);
   }
 
-  // Natural (ungroomed) mountain height.
+  // Natural height with the flat pads (lift tops) pressed in, so runs start level with them.
   rawHeight(x, z) {
+    let h = this._natural(x, z);
+    for (const p of PADS) {
+      const d = Math.hypot(x - p.x, z - p.z);
+      if (d < p.r + 25) {
+        if (p.h === undefined) p.h = this._natural(p.x, p.z);
+        h += (p.h - h) * (1 - smoothstep(p.r, p.r + 25, d));
+      }
+    }
+    return h;
+  }
+
+  // Natural (ungroomed) mountain height.
+  _natural(x, z) {
     const s = SUMMIT.z - z;
     let h = this._elev(s);
     // summit is a peak: the top falls off to the sides
@@ -89,6 +101,8 @@ export class Terrain {
     h += 15 * fbm(x / 260 + 3.1, z / 260, 3);
     h += 2.4 * fbm(x / 42, z / 42, 3);
     h += 0.5 * fbm(x / 9, z / 9, 2);
+    // past the lifts the base area turns uphill so you roll to a stop instead of leaving the mountain
+    if (z < BASE_Z - 75) { const e = BASE_Z - 75 - z; h += 0.25 * e + 0.012 * e * e; }
     return h;
   }
 
@@ -101,12 +115,17 @@ export class Terrain {
     for (const run of this.runs) {
       const n = run.n, base = new Float32Array(n);
       for (let i = 0; i < n; i++) base[i] = this.rawHeight(run.xs[i], run.zs[i]);
-      const win = 20;
-      for (let i = 0; i < n; i++) {
-        let sum = 0, c = 0;
-        for (let k = Math.max(0, i - win); k <= Math.min(n - 1, i + win); k++) { sum += base[k]; c++; }
-        run.prof[i] = sum / c;
-      }
+      // two passes of a wide moving average -> long, smooth rollers instead of bumps
+      const smooth = (src, dst, win) => {
+        for (let i = 0; i < n; i++) {
+          const w = Math.min(win, i, n - 1 - i);     // narrower near the ends so runs start and finish at ground level
+          let sum = 0, c = 0;
+          for (let k = i - w; k <= i + w; k++) { sum += src[k]; c++; }
+          dst[i] = sum / c;
+        }
+      };
+      const tmp = new Float32Array(n);
+      smooth(base, tmp, 30); smooth(tmp, run.prof, 30);
       const minSlope = DIFF[run.diff].minSlope;
       for (let i = 1; i < n; i++) {
         const nearEnd = (n - i) * RUN_STEP < 120 || run.zs[i] < BASE_Z + 30;
@@ -150,13 +169,11 @@ export class Terrain {
         sumW += w; sumWP += w * run.profileAt(this.runS[ri][q]); maxW = Math.max(maxW, w);
       });
       let h = raw[q];
-      if (maxW > 0) h += (sumWP / sumW + 0.3 * fbm(x / 11, z / 11, 2) - h) * maxW;
+      if (maxW > 0) h += (sumWP / sumW + 0.05 * fbm(x / 25, z / 25, 2) - h) * maxW;   // groomed = smooth
+      // the pads stay flat even where a run starts on them
       for (const p of PADS) {
         const d = Math.hypot(x - p.x, z - p.z);
-        if (d < p.r + 25) {
-          if (p.h === undefined) p.h = this.rawHeight(p.x, p.z);
-          h += (p.h - h) * (1 - smoothstep(p.r, p.r + 25, d));
-        }
+        if (d < p.r) h += (p.h - h) * (1 - smoothstep(p.r * 0.6, p.r, d));
       }
       this.H[q] = h; this.groom[q] = maxW; this.edgeDist[q] = edge;
     }
@@ -555,39 +572,6 @@ export class Terrain {
         }
       }
     }
-  }
-
-  _buildFinishGates() {
-    const mat = new THREE.MeshStandardMaterial({ color: 0xe04a3a });
-    const tex = this._labelTexture('BASE · FINISH', 0xe04a3a);
-    const done = [];
-    for (const run of this.runs) {
-      if (run.zs[run.n - 1] > BASE_Z) continue;
-      const a = run.at(run.sAtZ(BASE_Z + 5));
-      if (done.some(d => Math.hypot(d.x - a.x, d.z - a.z) < 30)) continue;
-      done.push(a);
-      const hw = run.hw - 3, px = -a.tz, pz = a.tx;
-      let top = -Infinity;
-      for (const s of [-1, 1]) {
-        const x = a.x + px * hw * s, z = a.z + pz * hw * s, y = this.terrainHeight(x, z);
-        top = Math.max(top, y + 6.5);
-        const pole = new THREE.Mesh(new THREE.BoxGeometry(0.5, 7, 0.5), mat);
-        pole.position.set(x, y + 3.5, z); pole.castShadow = true; this.scene.add(pole);
-      }
-      const banner = new THREE.Mesh(new THREE.BoxGeometry(hw * 2, 1.3, 0.2), new THREE.MeshStandardMaterial({ map: tex }));
-      banner.position.set(a.x, top, a.z); banner.rotation.y = Math.atan2(px, pz) - Math.PI / 2;
-      this.scene.add(banner);
-    }
-  }
-
-  _labelTexture(text, color) {
-    const c = document.createElement('canvas'); c.width = 512; c.height = 64;
-    const g = c.getContext('2d');
-    g.fillStyle = '#' + new THREE.Color(color).getHexString(); g.fillRect(0, 0, 512, 64);
-    g.fillStyle = '#fff'; g.font = 'bold 40px Trebuchet MS, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText(text, 256, 34);
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-    return t;
   }
 
   // Where a new session starts: the summit, facing down Main Street.

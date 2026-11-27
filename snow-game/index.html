@@ -23,6 +23,7 @@
   </div>
   <div id="run-tag"></div>
   <div id="speedo"></div>
+  <div id="lift-guide" class="hidden"></div>
   <div id="trick-live"></div>
   <div id="popups"></div>
   <div id="controls-help"></div>
@@ -43,17 +44,6 @@
   <div id="menu-controls"></div>
 </div>
 
-<div id="finish" class="screen hidden">
-  <h1>Run complete</h1>
-  <table id="summary"></table>
-  <div class="btns">
-    <button id="btn-lift" class="big">🚡 Summit Express</button>
-    <button id="btn-lift2" class="big alt">🚡 Ridge Lift</button>
-    <button id="btn-restart" class="opt">Skip to the summit</button>
-  </div>
-  <p class="hint">Enter / A: Summit Express · 2 / X: Ridge Lift · R / Menu: skip to the summit · Esc / View: menu</p>
-</div>
-
 <div id="lift-ui" class="hidden">
   <div id="lift-top">
     <div class="lift-name">🚡 Summit Express</div>
@@ -62,6 +52,7 @@
   </div>
   <div id="map-panel" class="panel"><div class="panel-title">Trail map</div><div id="map-wrap"></div></div>
   <div id="hl-panel" class="panel">
+    <div id="run-summary"></div>
     <div class="panel-title">Your highlights</div>
     <div id="hl-list"></div>
     <p class="muted">1 / 2 / 3 or click to replay · Xbox: D-pad + A</p>
@@ -79,6 +70,6 @@
   <div class="muted">Drag or right stick to orbit</div>
 </div>
 
-<script type="module" src="src-v2/main.js"></script>
+<script type="module" src="src-v3/main.js"></script>
 </body>
 </html>

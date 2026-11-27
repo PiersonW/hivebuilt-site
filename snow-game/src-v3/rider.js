@@ -13,10 +13,10 @@ export const TUNE = {
   tuckGrip: 5.0,
   brakeGrip: 2.2,
   carveKeep: 0.72,        // share of sideways speed turned into forward speed while carving
-  snowFriction: 0.03,
-  drag: 0.0036,           // normal stance air drag (v^2)
-  tuckDrag: 0.0021,
-  standDrag: 0.011,
+  snowFriction: 0.045,
+  drag: 0.0082,           // normal stance air drag (v^2)
+  tuckDrag: 0.0047,
+  standDrag: 0.02,
   brakeDecel: 11,
   jumpBase: 3.6,          // m/s pop with no charge
   jumpCharge: 3.6,        // extra pop at full charge
@@ -31,6 +31,8 @@ export const TUNE = {
   maxSpeed: 26.5,         // m/s (~59 mph): above this the snow starts holding you back
   topSpeed: 65 / 2.237,   // hard cap: 65 mph
   crashTime: 2.2,
+  crashFriction: 9,       // m/s^2 slowing while tumbling
+  crashMaxSpeed: 14,      // m/s, tumble speed right after a crash
 };
 
 const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
@@ -284,7 +286,7 @@ export class Rider {
     // tree hits
     if (this.state === 'ride' || this.state === 'air') {
       const t = this.terrain.treeNear(this.pos.x, this.pos.z);
-      if (t && this.pos.y < t.y + t.h) this.doCrash(t.kind === 'tower' ? 'Hit a lift tower!' : 'Hit a tree!');
+      if (t && this.pos.y < t.y + t.h) this.doCrash({ tower: 'Hit a lift tower!', lodge: 'Hit the lodge!' }[t.kind] || 'Hit a tree!');
     }
   }
 
@@ -473,21 +475,32 @@ export class Rider {
     this.crashSpin.set((Math.random() - 0.5) * 14, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 14);
     this.crashQ.copy(this.root.quaternion);
     if (reason.startsWith('Hit')) this.vel.multiplyScalar(-0.15);
+    // keep crashes low: no upward launch, and cap the tumble speed
+    this.vel.y = Math.min(this.vel.y, 1);
+    const sp = this.vel.length();
+    if (sp > TUNE.crashMaxSpeed) this.vel.multiplyScalar(TUNE.crashMaxSpeed / sp);
     this.events.push({ type: 'crash', reason });
   }
 
   _crash(dt) {
+    // tumble along the snow: stay on the ground, lose speed fast, never bounce high
     this.crashT += dt;
-    const gh = this.terrain.heightAt(this.pos.x, this.pos.z);
     this.vel.y -= G * dt;
     this.pos.addScaledVector(this.vel, dt);
+    const gh = this.terrain.heightAt(this.pos.x, this.pos.z);
     if (this.pos.y < gh + 0.3) {
       this.pos.y = gh + 0.3;
-      if (this.vel.y < 0) this.vel.y = -this.vel.y * 0.3;
-      this.vel.multiplyScalar(Math.exp(-2.2 * dt));
-      this.crashSpin.multiplyScalar(Math.exp(-1.8 * dt));
-      this.spray = Math.min(1, this.vel.length() / 10);
+      const n = this.terrain.normalAt(this.pos.x, this.pos.z);
+      const vn = this.vel.dot(n);
+      if (vn < 0) this.vel.addScaledVector(n, -vn * 1.12);          // tiny bounce
+      const sp = this.vel.length();
+      if (sp > 1e-3) this.vel.multiplyScalar(Math.max(0, sp - TUNE.crashFriction * dt) / sp);
+      this.crashSpin.multiplyScalar(Math.exp(-2.2 * dt));
+      this.spray = Math.min(1, sp / 10);
     } else this.spray = 0;
+    // a tumbling rider doesn't slide through trees
+    const t = this.terrain.treeNear(this.pos.x, this.pos.z);
+    if (t) { this.vel.x *= -0.1; this.vel.z *= -0.1; }
     const w = this.crashSpin.length();
     if (w > 1e-3) {
       const dq = new THREE.Quaternion().setFromAxisAngle(this.crashSpin.clone().normalize(), w * dt);
