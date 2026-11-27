@@ -220,7 +220,7 @@ function startHeli() {
   heliUi.classList.remove('hidden');
   // the helicopter flies itself back and forth along the top ridge, from the right side to the left
   const z = -25, a = new THREE.Vector3(330, 0, z), b = new THREE.Vector3(-330, 0, z);
-  const start = new THREE.Vector3(300, terrain.heightAt(300, z) + 70, z);
+  const start = new THREE.Vector3(300, terrain.heightAt(300, z) + 140, z);
   heli.patrol(terrain, a, b, start);
   rider.state = 'heli';
   rider.flip = 0; rider.alignQ.identity();
@@ -486,7 +486,10 @@ function laneEntrance(l) { return l.bottom.clone().addScaledVector(l.f, l.lane.d
 function updateLiftGuide() {
   if (rider.state === 'fly') {
     const above = Math.max(0, rider.pos.y - terrain.heightAt(rider.pos.x, rider.pos.z));
-    liftGuideEl.innerHTML = `🦅 Wingsuit · ${Math.round(above)} m above the snow<br><small>↓ dive · ↑ flare · ← → turn · touch down anywhere to ride</small>`;
+    const ft = Math.round(above * 3.281);
+    liftGuideEl.innerHTML = rider.chute
+      ? `🪂 Parachute open · ${ft} ft<br><small>← → steer · you'll touch down and ride away</small>`
+      : `🦅 Wingsuit · ${ft} ft above the snow<br><small>↓ dive · ↑ flare · ← → turn · parachute opens at 50 ft</small>`;
     liftGuideEl.classList.remove('hidden');
     return;
   }
@@ -678,6 +681,7 @@ function handleEvents() {
       emitPowder(30, rider.pos, rider.vel, 2.5);
     }
     else if (ev.type === 'fly-end') { /* flight over (landed or crashed) */ }
+    else if (ev.type === 'chute') hud.popup('🪂 Parachute!', 0);
     else if (ev.type === 'grind-start') { if (!tricks.active) { tricks.begin(); recorder.onTakeoff(); } }
     else if (ev.type === 'land') {
       const parts = tricks.active ? tricks.parts() : [];

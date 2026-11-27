@@ -96,10 +96,10 @@ export class Helicopter {
       this.bank += (turn * 0.5 - this.bank) * Math.min(1, dt * 2);
       const f = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
       p.addScaledVector(f, this.speed * dt);
-      // hold ~70 m over the highest snow just below and ahead
+      // hold ~140 m over the highest snow just below and ahead (room for a long wingsuit flight)
       let ground = -Infinity;
       for (const k of [0, 25, 50, 80]) ground = Math.max(ground, T.heightAt(p.x + f.x * k, p.z + f.z * k));
-      p.y += (ground + 70 - p.y) * Math.min(1, dt * 0.6) + Math.sin(this.t * 1.3) * 0.01;
+      p.y += (ground + 140 - p.y) * Math.min(1, dt * 0.6) + Math.sin(this.t * 1.3) * 0.01;
       this.vel.copy(f).multiplyScalar(this.speed);
       this.group.rotation.set(0.06, -this.yaw, -this.bank, 'YXZ');      // nose a touch down, banking in turns
     } else if (this.home) {

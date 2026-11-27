@@ -393,6 +393,11 @@ export class Rider {
       if (grab === 'Nose Grab') t[lead] = this._boardToBody(new THREE.Vector3(0, 0.08, -0.7), false);
     }
     if (phantom) { t[0] = sh[0].clone().add(new THREE.Vector3(0.3, 0.5, 0.1)); t[1] = sh[1].clone().add(new THREE.Vector3(-0.3, 0.5, 0.1)); }
+    if (this.state === 'fly' && this.chute) {   // hands up on the steering toggles
+      const pull = this.flyBank || 0;
+      t[0] = sh[0].clone().add(new THREE.Vector3(0.12, 0.5 - Math.max(0, -pull) * 0.25, 0.05));
+      t[1] = sh[1].clone().add(new THREE.Vector3(-0.12, 0.5 - Math.max(0, pull) * 0.25, 0.05));
+    }
     if (seated) { t[0] = new THREE.Vector3(0.2, 0.62, 0.3); t[1] = new THREE.Vector3(-0.2, 0.62, 0.3); }
     if (gettingUp && gu < 0.55) {   // hands push off the snow
       t[0] = new THREE.Vector3(0.35, 0.05, 0.35); t[1] = new THREE.Vector3(-0.35, 0.05, 0.35);
@@ -453,6 +458,7 @@ export class Rider {
     this.crouch = 0; this.charge = 0; this.lean = 0; this.brakeAmt = 0;
     this.getupT = -1; this.rail = null; this.boardslide = 0; this.pipeAir = false; this.standT = 1;
     if (this.wingMesh && this.wingMesh.visible) { this._wings(false); this._orientBody(); }   // restarted mid-flight
+    this.chute = false; if (this.canopy) this.canopy.visible = false;
     this.gear.visible = true;
     this.terrain.normalAt(pos.x, pos.z, this.normal);
     this.alignQ.setFromUnitVectors(UP, this.normal);
@@ -838,14 +844,66 @@ export class Rider {
     this.grab = null; this.phantomT = -1; this.crouch = 0; this.lean = 0; this.brakeAmt = 0; this.switch = false;
     this.gear.visible = false;
     this._wings(true);
+    this.chute = false; this._canopy(false);
+  }
+
+  // The parachute: a ram-air canopy above you on lines down to your shoulders.
+  _canopy(on) {
+    if (!this.canopy) {
+      const g = new THREE.Group(), R = 4.2, n = 7;
+      const cA = new THREE.MeshStandardMaterial({ color: 0xff8a1f, side: THREE.DoubleSide, flatShading: true, roughness: 0.6 });
+      const cB = new THREE.MeshStandardMaterial({ color: 0xf4f4f4, side: THREE.DoubleSide, flatShading: true, roughness: 0.6 });
+      const pts = [];
+      for (let i = 0; i < n; i++) {
+        const a = -0.75 + 1.5 * i / (n - 1);
+        const cell = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.32, 2.3), i % 2 ? cB : cA);
+        cell.position.set(R * Math.sin(a), R * Math.cos(a) - R, 0); cell.rotation.z = -a; cell.castShadow = true;
+        g.add(cell);
+        for (const z of [-0.9, 0.9]) pts.push(new THREE.Vector3(R * Math.sin(a), R * Math.cos(a) - R - 0.16, z), new THREE.Vector3(Math.sign(a || 0.001) * 0.22, -3.25, 0));
+      }
+      const lines = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x333333 }));
+      g.add(lines);
+      g.position.set(0, 1.45 + 3.25, 0);   // lines meet just above the shoulders
+      this.root.add(g);
+      this.canopy = g;
+    }
+    this.canopy.visible = on;
+    this.canopyT = 0;
+  }
+
+  _openChute() {
+    this.chute = true;
+    this.gear.visible = true;           // clip back in for the landing
+    this._wings(false);
+    this._orientBody();
+    this._canopy(true);
+    this.events.push({ type: 'chute' });
   }
 
   _fly(dt, input) {
     const T = TUNE;
+    const W0 = this.terrain, alt = this.pos.y - W0.heightAt(this.pos.x, this.pos.z);
+    if (!this.chute && alt < 15.24 && this.vel.y < 0) this._openChute();       // 50 ft
+    if (this.chute) {
+      // under canopy: slow to a gentle glide and steer with ← →
+      this.flyYaw += (input.steer || 0) * 0.9 * dt;
+      this.flyBank = damp(this.flyBank, input.steer || 0, 3, dt);
+      const h = Math.hypot(this.vel.x, this.vel.z), hs = damp(h, 9, 1.8, dt);
+      // come down ~4 m/s toward the snow below you, even where the slope falls away under you
+      const fx = Math.sin(this.flyYaw), fz = -Math.cos(this.flyYaw);
+      const fall = Math.max(0, W0.heightAt(this.pos.x, this.pos.z) - W0.heightAt(this.pos.x + fx * 4, this.pos.z + fz * 4)) / 4;
+      this.vel.set(fx * hs, damp(this.vel.y, -(4 + fall * hs), 4, dt), fz * hs);
+      this.flySpeed = this.vel.length(); this.flyGamma = 0.3;
+      this.pos.addScaledVector(this.vel, dt);
+      this.flyDist += hs * dt;
+      this.yaw = this.flyYaw; this.airYaw = this.flyYaw;
+      this.canopyT = Math.min(1, (this.canopyT || 0) + dt / 0.7);
+      return this._flyContact();
+    }
     const pitch = (input.down ? 1 : 0) - (input.up ? 1 : 0);         // + = dive
     // glide angle (down from level): normal glide ~22 deg, dive 50 deg, flare can climb briefly when fast
     const fast = smoothstep(18, 32, this.flySpeed);
-    let gWant = pitch > 0 ? 0.95 : pitch < 0 ? -0.28 * fast + 0.12 * (1 - fast) : 0.5;
+    let gWant = pitch > 0 ? 0.95 : pitch < 0 ? -0.28 * fast + 0.12 * (1 - fast) : 0.41;
     if (this.flySpeed < 13) gWant = Math.max(gWant, 0.55 + (13 - this.flySpeed) * 0.05);   // stalling: nose drops
     this.flyGamma = damp(this.flyGamma, gWant, 1.6, dt);
     this.flyBank = damp(this.flyBank, input.steer || 0, 3, dt);
@@ -865,14 +923,20 @@ export class Rider {
       const want = Math.atan2(-this.pos.x, -60);
       this.flyYaw += wrap(want - this.flyYaw) * 1.2 * dt;
     }
-    // trees and towers
+    this._flyContact();
+  }
+
+  // trees, towers and touching down (wingsuit or parachute)
+  _flyContact() {
+    const W = this.terrain;
     const t = W.treeNear(this.pos.x, this.pos.z);
     const gh = W.heightAt(this.pos.x, this.pos.z);
     if (t && this.pos.y < t.y + t.h) { this._endFlight(); this.doCrash(t.kind === 'tree' ? 'Flew into a tree!' : 'Flew into something!'); return; }
     if (this.pos.y <= gh + 0.05) {
       this.pos.y = gh;
+      const underChute = this.chute;
       this._endFlight();
-      if (this.flyGamma > 0.78 && this.flySpeed > 30) { this.doCrash('Came in too steep!'); return; }
+      if (!underChute && this.flyGamma > 0.78 && this.flySpeed > 30) { this.doCrash('Came in too steep!'); return; }
       // touch down: carry the speed along the snow (capped so it's rideable)
       const n = W.normalAt(this.pos.x, this.pos.z, this.normal);
       this.vel.addScaledVector(n, -this.vel.dot(n));
@@ -885,6 +949,7 @@ export class Rider {
   }
 
   _endFlight() {
+    this.chute = false; if (this.canopy) this.canopy.visible = false;
     this.gear.visible = true;
     this._wings(false);
     this._orientBody();
@@ -1058,6 +1123,16 @@ export class Rider {
       return;
     }
     root.position.copy(this.pos);
+    if (this.state === 'fly' && this.chute) {
+      // hanging under the canopy, upright, swinging a little into turns
+      const q = new THREE.Quaternion().setFromAxisAngle(UP, -this.yaw)
+        .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -this.flyBank * 0.25));
+      root.quaternion.copy(q); root.position.copy(this.pos);
+      const e = this.canopyT * this.canopyT * (3 - 2 * this.canopyT);
+      this.canopy.scale.set(0.15 + 0.85 * e, 0.3 + 0.7 * e, 0.3 + 0.7 * e);
+      this._updatePose(dt, {});
+      return;
+    }
     if (this.state === 'fly') {
       // lie flat, head first along the flight path, nose a little down when diving, banked into turns
       const F = new THREE.Vector3(Math.sin(this.flyYaw), -Math.sin(this.flyGamma * 0.45 + 0.05), -Math.cos(this.flyYaw)).normalize();
