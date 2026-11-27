@@ -14,7 +14,8 @@ export class Helicopter {
     add(new THREE.BoxGeometry(2.4, 2.2, 4.6), paint, 0, 0, 0);
     add(new THREE.CylinderGeometry(1.2, 1.2, 2.4, 10, 1, false, 0, Math.PI), paint, 0, 0, -2.3, 0, 0, Math.PI / 2);
     add(new THREE.BoxGeometry(2.3, 1.0, 1.6), glass, 0, 0.35, -2.7, -0.35);
-    add(new THREE.BoxGeometry(0.05, 1.6, 1.8), dark, 1.21, 0, 0.2);            // the open doorway
+    add(new THREE.BoxGeometry(0.05, 1.6, 1.8), dark, 1.21, 0, 0.2);            // open doorways, both sides
+    add(new THREE.BoxGeometry(0.05, 1.6, 1.8), dark, -1.21, 0, 0.2);
     add(new THREE.BoxGeometry(2.42, 0.25, 4.62), white, 0, -0.6, 0);            // stripe
     // tail boom, fin and tail rotor
     add(new THREE.BoxGeometry(0.55, 0.6, 6.5), paint, 0, 0.45, 5.4);
@@ -46,15 +47,30 @@ export class Helicopter {
     this.leaving = 0; this.vel.set(0, 0, 0);
   }
 
-  // Where you stand in the doorway (world space) and which way you'll jump.
-  doorPoint() {
-    this.group.updateMatrixWorld();
-    return this.group.localToWorld(new THREE.Vector3(1.35, -1.75, 0.2));
+  // Fly back and forth across the top of the mountain on its own: between two points, turning round
+  // gently at each end, holding a steady height over the ridge.
+  patrol(terrain, a, b, pos) {
+    this.terrain = terrain; this.route = [a, b]; this.leg = 1; this.speed = 17;
+    this.home = null; this.leaving = 0; this.vel.set(0, 0, 0);
+    this.group.position.copy(pos);
+    this.yaw = Math.atan2(b.x - pos.x, -(b.z - pos.z));
+    this.group.rotation.set(0, -this.yaw, 0, 'YXZ');
+    this.group.visible = true; this.bank = 0;
   }
 
-  leave() { this.leaving = 0.001; }
+  // The doorway on the downhill side (where you stand) and its outward direction.
+  door() {
+    const right = new THREE.Vector3(Math.cos(this.yaw), 0, Math.sin(this.yaw));
+    const side = right.z < 0 ? 1 : -1;            // whichever side faces down the mountain
+    this.group.updateMatrixWorld();
+    return { pos: this.group.localToWorld(new THREE.Vector3(side * 1.35, -1.75, 0.2)), out: right.multiplyScalar(side), side };
+  }
 
-  hide() { this.group.visible = false; this.leaving = 0; }
+  doorPoint() { return this.door().pos; }
+
+  leave() { this.leaving = 0.001; this.route = null; }
+
+  hide() { this.group.visible = false; this.leaving = 0; this.route = null; }
 
   update(dt) {
     if (!this.group.visible) return;
@@ -70,6 +86,22 @@ export class Helicopter {
       this.group.position.addScaledVector(this.vel, dt);
       this.group.rotation.set(-Math.min(0.2, this.leaving * 0.06), -this.yaw, Math.min(0.3, Math.max(0, this.leaving - 1.5) * 0.15), 'YXZ');
       if (this.leaving > 14) this.hide();
+    } else if (this.route) {
+      const T = this.terrain, p = this.group.position, tgt = this.route[this.leg];
+      if (Math.hypot(tgt.x - p.x, tgt.z - p.z) < 40) this.leg = 1 - this.leg;
+      const want = Math.atan2(tgt.x - p.x, -(tgt.z - p.z));
+      let d = want - this.yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+      const turn = Math.max(-0.45, Math.min(0.45, d * 1.2));
+      this.yaw += turn * dt;
+      this.bank += (turn * 0.5 - this.bank) * Math.min(1, dt * 2);
+      const f = new THREE.Vector3(Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      p.addScaledVector(f, this.speed * dt);
+      // hold ~70 m over the highest snow just below and ahead
+      let ground = -Infinity;
+      for (const k of [0, 25, 50, 80]) ground = Math.max(ground, T.heightAt(p.x + f.x * k, p.z + f.z * k));
+      p.y += (ground + 70 - p.y) * Math.min(1, dt * 0.6) + Math.sin(this.t * 1.3) * 0.01;
+      this.vel.copy(f).multiplyScalar(this.speed);
+      this.group.rotation.set(0.06, -this.yaw, -this.bank, 'YXZ');      // nose a touch down, banking in turns
     } else if (this.home) {
       // gentle hover bob
       this.group.position.y = this.home.y + Math.sin(this.t * 1.3) * 0.25;

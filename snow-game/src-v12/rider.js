@@ -312,6 +312,14 @@ export class Rider {
     this.helmet.quaternion.setFromUnitVectors(UP, headDir);
     this.goggles.position.copy(this.head.position).add(new THREE.Vector3(0, 0.02, 0.13));
     this.goggles.quaternion.copy(this.helmet.quaternion);
+    // look where you're going: snowboarders look over the front shoulder, everyone looks into the turn
+    const look = this.state === 'lift' ? 0 : ski ? -this.lean * 0.5 : sig * (this.switch ? -1 : 1) * 0.95 * (1 - tw) - this.lean * 0.35;
+    if (Math.abs(look) > 0.01) {
+      const Rh = new THREE.Quaternion().setFromAxisAngle(headDir, look);
+      this.goggles.position.sub(this.head.position).applyQuaternion(Rh).add(this.head.position);
+      this.goggles.quaternion.premultiply(Rh);
+      this.head.quaternion.copy(Rh);
+    } else this.head.quaternion.identity();
 
     // hands
     const sh = [neck.clone().add(new THREE.Vector3(0.21, -0.06, 0)), neck.clone().add(new THREE.Vector3(-0.21, -0.06, 0))];
@@ -322,12 +330,48 @@ export class Rider {
     ];
     // turning swings the arms
     t[0].z += this.lean * 0.4; t[1].z -= this.lean * 0.4;
+    // a bit of life: breathing sway, balance on the edges, tucking in with speed, flailing in big air
+    const now = performance.now() / 1000;
+    const onGround = this.state === 'ride';
+    const faceSign = (this.regular ? 1 : -1) * (this.switch ? -1 : 1);
+    const toe = ski ? 0 : this.lean * faceSign;                 // + = leaning onto the toe edge
+    for (let i = 0; i < 2; i++) {
+      const sd = i === 0 ? 1 : -1;
+      t[i].y += Math.sin(now * 1.7 + i * 1.3) * 0.015;
+      if (onGround) {
+        if (!ski) { t[i].z -= toe * 0.3; t[i].y += Math.abs(this.lean) * 0.1; }        // counterbalance the edge
+        t[i].y -= this.crouch * 0.12; t[i].x *= 1 - this.crouch * 0.3; t[i].z += this.crouch * 0.12;   // tuck in
+        if (this.brakeAmt > 0.05) { t[i].y += this.brakeAmt * 0.12; t[i].x += sd * this.brakeAmt * 0.12; }
+      }
+      if (this.state === 'air' && !grab && !phantom) {
+        // arms out for balance, lagging behind a spin and pulled in for flips
+        const a = Math.min(1, this.airTime * 2.5);
+        t[i].x += sd * 0.12 * a; t[i].y += 0.18 * a;
+        const lag = new THREE.Quaternion().setFromAxisAngle(UP, -this.spinVel * 0.06);
+        t[i].sub(neck).applyQuaternion(lag).add(neck);
+        const tuckF = Math.min(1, Math.abs(this.flipVel) / 5);
+        t[i].lerp(neck.clone().add(new THREE.Vector3(sd * 0.18, -0.3, 0.25)), tuckF * 0.6);
+      }
+      if (this.landBump > 0) { t[i].y -= this.landBump; t[i].z += this.landBump * 0.6; }
+    }
+    this.landBump = Math.max(0, (this.landBump || 0) - dt * 1.2);
     const edge = (side, z) => this._boardToBody(new THREE.Vector3(side * 0.16, 0.06, z), false);
     const back = 1 - lead;
     if (ski) {
       // skier: hands holding the poles out front, and ski grabs
       t[0] = sh[0].clone().add(new THREE.Vector3(0.12, -0.42 + 0.1 * this.crouch, 0.32));
       t[1] = sh[1].clone().add(new THREE.Vector3(-0.12, -0.42 + 0.1 * this.crouch, 0.32));
+      for (let i = 0; i < 2; i++) t[i].y += Math.sin(now * 1.7 + i * 1.3) * 0.015;
+      if (this.state === 'ride') {
+        // outside hand drifts forward in a turn; a quick pole plant on the inside to start each new turn
+        t[0].z += this.lean * 0.18; t[1].z -= this.lean * 0.18;
+        if (this.plantT > 0) {
+          const inside = this.turnSide > 0 ? 1 : 0, k = Math.sin(Math.PI * (1 - this.plantT / 0.5));
+          t[inside].z += 0.22 * k; t[inside].y -= 0.12 * k;
+        }
+      }
+      if (this.state === 'air' && !grab) { const a = Math.min(1, this.airTime * 2.5); t[0].x += 0.15 * a; t[1].x -= 0.15 * a; t[0].y += 0.12 * a; t[1].y += 0.12 * a; }
+      if (this.landBump > 0) for (let i = 0; i < 2; i++) { t[i].y -= this.landBump * 0.8; t[i].z += this.landBump * 0.4; }
       const skiPt = (rootX, z) => this._boardToBody(new THREE.Vector3(rootX, 0.05, z), false);
       if (push > 0.02) {
         // double pole: reach forward, plant, pull through past the hips, swing back forward
@@ -361,8 +405,18 @@ export class Rider {
       t[0] = sh[0].clone().add(new THREE.Vector3(0.4, 0.3 * Math.sin(w), 0.3 * Math.cos(w)));
       t[1] = sh[1].clone().add(new THREE.Vector3(-0.4, 0.3 * Math.cos(w), 0.3 * Math.sin(w)));
     }
+    this.plantT = Math.max(0, (this.plantT || 0) - dt);
+    if (!this.handVel) this.handVel = [new THREE.Vector3(), new THREE.Vector3()];
     for (let i = 0; i < 2; i++) {
-      this.handPos[i].lerp(t[i], 1 - Math.exp(-(grab || phantom ? 22 : 12) * dt));
+      // hands follow their target on a soft spring: they lag, swing and settle instead of snapping
+      if (grab || phantom || seated || this.state === 'crash') { this.handPos[i].lerp(t[i], 1 - Math.exp(-(grab || phantom ? 22 : 12) * dt)); this.handVel[i].set(0, 0, 0); }
+      else {
+        const k = 140, c = 15, h = Math.min(dt, 1 / 30);
+        const acc = t[i].clone().sub(this.handPos[i]).multiplyScalar(k).addScaledVector(this.handVel[i], -c);
+        this.handVel[i].addScaledVector(acc, h);
+        this.handPos[i].addScaledVector(this.handVel[i], h);
+        if (this.handPos[i].distanceToSquared(t[i]) > 0.5) { this.handPos[i].copy(t[i]); this.handVel[i].set(0, 0, 0); }
+      }
       const elbow = ik(sh[i], this.handPos[i], 0.33, 0.33, new THREE.Vector3(i === 0 ? 0.5 : -0.5, -0.6, -0.5));
       placeLimb(this.upperArms[i], sh[i], elbow, 0.11);
       placeLimb(this.foreArms[i], elbow, this.handPos[i], 0.1);
@@ -374,6 +428,7 @@ export class Rider {
         if (!flying && push > 0.02 && ph < 0.55) {   // pole tips stay planted in the snow behind the hands while pushing
           tipP.copy(this.handPos[i]).add(new THREE.Vector3(0, -1.1, -0.35 - 0.25 * (ph / 0.55)));
         }
+        if (!flying && this.plantT > 0 && i === (this.turnSide > 0 ? 1 : 0)) tipP.copy(this.handPos[i]).add(new THREE.Vector3(0, -1.1, 0.15));
         if (!flying) tipP.y = Math.max(tipP.y, 0.04);
         placeLimb(this.poles[i], this.handPos[i], tipP, 0.03);
       }
@@ -397,6 +452,8 @@ export class Rider {
     this.flip = 0; this.flipVel = 0; this.spinVel = 0; this.grab = null; this.phantomT = -1;
     this.crouch = 0; this.charge = 0; this.lean = 0; this.brakeAmt = 0;
     this.getupT = -1; this.rail = null; this.boardslide = 0; this.pipeAir = false; this.standT = 1;
+    if (this.wingMesh && this.wingMesh.visible) { this._wings(false); this._orientBody(); }   // restarted mid-flight
+    this.gear.visible = true;
     this.terrain.normalAt(pos.x, pos.z, this.normal);
     this.alignQ.setFromUnitVectors(UP, this.normal);
   }
@@ -478,7 +535,10 @@ export class Rider {
     if (!brake && Math.abs(this.lean) > 0.06) this.edge = Math.sign(this.lean) === faceSign ? 1 : -1;
     if (brake && this.brakeAmt < 0.05) this.brakeEdge = this.edge;     // skid on the edge you were on
     if (!brake && this.brakeAmt < 0.05) this.brakeEdge = this.edge;
-    if (Math.abs(input.steer) > 0.3) this.turnSide = Math.sign(input.steer);
+    if (Math.abs(input.steer) > 0.3) {
+      if (this.turnSide && Math.sign(input.steer) !== this.turnSide) this.plantT = 0.5;   // skier: pole plant to start the new turn
+      this.turnSide = Math.sign(input.steer);
+    }
     if (!brake && this.brakeAmt < 0.05) this.brakeSide = this.turnSide || 1;
 
     // board axes on the slope
@@ -681,6 +741,7 @@ export class Rider {
     this.state = 'ride';
     this.grab = null; this.flip = 0; this.pipeAir = false;
     this.crouch = 0.7 + Math.min(0.3, impact / 30);
+    this.landBump = Math.min(0.35, 0.08 + impact * 0.02);   // arms drop and swing with the landing
     this.events.push({ type: 'land', impact, switch: this.switch, sloppy });
   }
 
@@ -1001,7 +1062,7 @@ export class Rider {
       // lie flat, head first along the flight path, nose a little down when diving, banked into turns
       const F = new THREE.Vector3(Math.sin(this.flyYaw), -Math.sin(this.flyGamma * 0.45 + 0.05), -Math.cos(this.flyYaw)).normalize();
       const upW = new THREE.Vector3(0, 1, 0).addScaledVector(F, -F.y).normalize();
-      upW.applyAxisAngle(F, -this.flyBank * 0.7);
+      upW.applyAxisAngle(F, this.flyBank * 0.7);     // bank into the turn (right turn = right wing down)
       const X = new THREE.Vector3().crossVectors(F, upW).normalize();
       // root axes: +y -> forward (head), +z -> up (back), so the body's chest (root -z) faces the snow
       root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, F, upW));

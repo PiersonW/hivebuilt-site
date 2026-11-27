@@ -51,7 +51,7 @@ const GULLIES = [
 const RIDGES = [
   [[150, -405], [200, -415], 3.2],
   [[-28, -470], [8, -480], 3],
-  [[240, -935], [290, -950], 3.5],
+  [[255, -935], [295, -948], 3.5],
   [[-262, -575], [-228, -585], 3],
 ];
 // Cliff bands: [a, b, drop]
@@ -70,7 +70,7 @@ const SNOW_ROCKS = [
   [-245, -960, 3, 1.7], [-250, -1130, 3, 1.6],
 ];
 // A hidden yeti (way out on the right-hand valley wall; easiest to reach from the air)
-export const YETI = { x: 334, z: -300 };
+export const YETI = { x: 362, z: -560 };
 // a line segment's frame: along (ex, ez), downhill-side normal (nx, nz), length
 function segFrame([a, b]) {
   let ex = b[0] - a[0], ez = b[1] - a[1]; const len = Math.hypot(ex, ez); ex /= len; ez /= len;

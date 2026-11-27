@@ -22,7 +22,7 @@ export const ACHIEVEMENTS = [
   { id: 'score10k', icon: '💯', name: 'Big Score', desc: 'Score 10,000 points in one run.', group: 'Tricks' },
   { id: 'speed', icon: '⚡', name: 'Speed Demon', desc: 'Hit 65 mph.', group: 'Tricks' },
   // places
-  { id: 'runs', icon: '🗺️', name: 'Mountain Tour', desc: 'Ride every run on the mountain.', group: 'Explore', goal: 7 },
+  { id: 'runs', icon: '🗺️', name: 'Mountain Tour', desc: 'Ride every run on the mountain.', group: 'Explore', goal: 8 },
   { id: 'lifts', icon: '🚡', name: 'Lift Lapper', desc: 'Ride both chairlifts.', group: 'Explore', goal: 2 },
   { id: 'pipe', icon: '🛹', name: 'Pipe Dream', desc: 'Land an air in the halfpipe.', group: 'Explore' },
   { id: 'pipe_big', icon: '🚀', name: 'Above the Lip', desc: 'Get 3 m above the halfpipe lip.', group: 'Explore' },
@@ -35,6 +35,11 @@ export const ACHIEVEMENTS = [
   { id: 'heli', icon: '🚁', name: 'Heli Drop', desc: 'Jump out of the helicopter.', group: 'Explore' },
   { id: 'wingsuit', icon: '🦅', name: 'Bird Person', desc: 'Land the wingsuit on your feet.', group: 'Explore' },
   { id: 'flight', icon: '✈️', name: 'Long Flight', desc: 'Fly 800 m in the wingsuit.', group: 'Explore' },
+  // racing
+  { id: 'race_finish', icon: '🏁', name: 'Racer', desc: 'Finish a race on the Race Course.', group: 'Racing' },
+  { id: 'race_clean', icon: '🚩', name: 'Clean Run', desc: 'Finish a race without missing a gate.', group: 'Racing' },
+  { id: 'race_pr', icon: '📈', name: 'Personal Best', desc: 'Beat your own best race time.', group: 'Racing' },
+  { id: 'race_fast', icon: '🥇', name: 'Gold Medal Pace', desc: 'Finish a clean race in under 50 seconds.', group: 'Racing' },
   // gaps
   { id: 'gap_chute', icon: '🎯', name: 'Chute Gap', desc: 'Clear the Rocky Chute cliff and land 25 m past the edge.', group: 'Gaps' },
   { id: 'gap_lift', icon: '🎯', name: 'Lift Line Gap', desc: 'Jump clean over a chairlift line.', group: 'Gaps', hidden: true },

@@ -26,6 +26,7 @@ export class Input {
     this.state = {};
     this.padName = null;
     window.addEventListener('keydown', (e) => {
+      if (e.target && e.target.tagName === 'INPUT') { if (e.code === 'Enter' || e.code === 'Escape') e.target.blur(); return; }   // typing your name
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
       this.keys.add(e.code);
       if (!e.repeat) this.tapped.add(e.code);

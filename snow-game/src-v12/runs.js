@@ -7,6 +7,7 @@ export const DIFF = {
   blue: { label: 'More difficult', color: '#2a64c8', minSlope: 0.10 },
   black: { label: 'Most difficult', color: '#111111', minSlope: 0.14 },
   park: { label: 'Terrain park', color: '#ff7a1a', minSlope: 0.10 },
+  race: { label: 'Race course', color: '#d63030', minSlope: 0.12 },
 };
 
 export const RUN_DEFS = [
@@ -32,6 +33,12 @@ export const RUN_DEFS = [
     // with the halfpipe on the gentler lower section
     pts: [[-50, -118], [-62, -220], [-70, -330], [-68, -440], [-55, -540], [-30, -650], [-10, -760], [-25, -860], [-80, -920],
       [-100, -1010], [-98, -1090], [-106, -1170], [-126, -1250], [-170, -1318], [-214, -1332]],
+  },
+  {
+    // giant slalom course down the far right of the mountain (opposite side from the halfpipe);
+    // starts beside the Summit Express top and runs out into the bottom of Rocky Chute
+    id: 'race', name: 'Race Course', diff: 'race', width: 30,
+    pts: [[100, -5], [190, -60], [262, -150], [282, -300], [280, -480], [275, -650], [262, -800], [230, -900], [205, -960]],
   },
   {
     id: 'timber', name: 'Timber Line', diff: 'blue', width: 30,

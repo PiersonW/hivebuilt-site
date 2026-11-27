@@ -14,6 +14,7 @@ import { BTN } from './input.js';
 import { Npcs } from './npcs.js';
 import { Helicopter } from './heli.js';
 import { Achievements } from './achievements.js';
+import { Race, fmtRace } from './race.js';
 import { YETI, PIPE } from './terrain.js';
 import { SKI_GRABS } from './rider.js';
 
@@ -63,6 +64,7 @@ document.getElementById('map-wrap').appendChild(trailMap.canvas);
 
 const rider = new Rider(scene, terrain);
 const heli = new Helicopter(scene);
+const race = new Race(scene, terrain);
 const ach = new Achievements(document.getElementById('ach-toast'));
 // other skiers and snowboarders, on the runs and on the chairs
 const npcs = new Npcs(scene, terrain, {
@@ -165,7 +167,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
+window.__game = { race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -190,6 +192,7 @@ document.getElementById('btn-ski').onclick = () => setSport('ski');
 // Start a run at the top (or at `at`, e.g. the lift unload point).
 function startRun(at = null, yaw = 0) {
   game.mode = 'run';
+  race.reset(); raceHudEl.classList.add('hidden');
   game.paused = false; game.runsVisited = []; game.score = 0; game.time = 0; game.crashes = 0; game.bestTrick = null; game.tricksLanded = 0; game.started = false;
   rider.topSpeed = 0;
   rider.reset(at || terrain.spawnPoint(), yaw);
@@ -215,38 +218,78 @@ function startHeli() {
   game.mode = 'heli';
   hud.show(false);
   heliUi.classList.remove('hidden');
-  const x = 40, z = -60, y = terrain.heightAt(x, z) + 120;
-  heli.hover(new THREE.Vector3(x, y, z), 0);
+  // the helicopter flies itself back and forth along the top ridge, from the right side to the left
+  const z = -25, a = new THREE.Vector3(330, 0, z), b = new THREE.Vector3(-330, 0, z);
+  const start = new THREE.Vector3(300, terrain.heightAt(300, z) + 70, z);
+  heli.patrol(terrain, a, b, start);
   rider.state = 'heli';
   rider.flip = 0; rider.alignQ.identity();
-  heliCam = 0;
+  heliCam = { yaw: 0.35, pitch: 0.32, t: 0 };
 }
 function updateHeliMode(dt, inp) {
-  // fly the helicopter around to pick a spot: ← → sideways, ↑ ↓ up or down the mountain
-  const h = heli.home, sp = 22 * dt;
-  h.x = Math.max(-330, Math.min(330, h.x + (inp.steer || 0) * sp));
-  h.z = Math.max(-1250, Math.min(60, h.z + ((inp.down ? 1 : 0) - (inp.up ? 1 : 0)) * sp));
   if (inp.menuPressed) { showMenu(); return; }
-  const want = Math.max(terrain.heightAt(h.x, h.z), terrain.heightAt(h.x, h.z - 60)) + 110;
-  h.y += (want - h.y) * Math.min(1, dt * 0.8);
-  heli.group.position.x = h.x; heli.group.position.z = h.z;
-  const door = heli.doorPoint();
-  rider.pos.copy(door); rider.yaw = heli.yaw + Math.PI / 2; rider.airYaw = rider.yaw;
+  const d = heli.door();
+  rider.pos.copy(d.pos); rider.yaw = Math.atan2(d.out.x, -d.out.z); rider.airYaw = rider.yaw;
   rider.updateVisual(dt, {});
-  // camera: behind the helicopter's open door, looking down the mountain
-  heliCam += dt;
-  const cp = door.clone().add(new THREE.Vector3(9 + Math.sin(heliCam * 0.3) * 1.5, 3.5, 13));
-  camera.position.lerp(cp, heliCam < 0.05 ? 1 : 1 - Math.exp(-4 * dt));
-  camera.lookAt(door.x + 6, door.y - 30, door.z - 90);
-  if (Math.abs(camera.fov - 64) > 0.1) { camera.fov = 64; camera.updateProjectionMatrix(); }
+  // camera: well out from the helicopter so you see all of it and the mountain; arrows / right stick / mouse look around
+  const k = (c) => input.keys.has(c);
+  const lx = (k('ArrowRight') ? 1 : 0) - (k('ArrowLeft') ? 1 : 0) + (inp.lookX || 0) + (inp.steer && !k('ArrowLeft') && !k('ArrowRight') ? inp.steer : 0);
+  const ly = (k('ArrowUp') ? 1 : 0) - (k('ArrowDown') ? 1 : 0) - (inp.lookY || 0);
+  heliCam.yaw -= lx * 1.4 * dt + (inp.mouseX || 0) * 0.005;
+  heliCam.pitch = Math.max(-0.25, Math.min(1.2, heliCam.pitch + ly * 1.0 * dt + (inp.mouseY || 0) * 0.004));
+  heliCam.t += dt;
+  const c = heli.group.position, D = 32;
+  // yaw 0 = looking down the mountain from behind the helicopter's uphill side
+  const cp = new THREE.Vector3(c.x + Math.sin(heliCam.yaw) * Math.cos(heliCam.pitch) * D, c.y + Math.sin(heliCam.pitch) * D, c.z + Math.cos(heliCam.yaw) * Math.cos(heliCam.pitch) * D);
+  cp.y = Math.max(cp.y, terrain.heightAt(cp.x, cp.z) + 3);
+  camera.position.lerp(cp, heliCam.t < 0.05 ? 1 : 1 - Math.exp(-6 * dt));
+  camera.lookAt(c.x, c.y - 6, c.z);
+  if (Math.abs(camera.fov - 62) > 0.1) { camera.fov = 62; camera.updateProjectionMatrix(); }
   if (inp.confirmPressed || inp.taps.has('Space') || inp.padTaps.has(BTN.A)) {
     heliUi.classList.add('hidden');
+    // dive out the downhill door, carrying the helicopter's speed
+    const f = new THREE.Vector3(Math.sin(heli.yaw), 0, -Math.cos(heli.yaw));
+    const dir = d.out.clone().multiplyScalar(14).addScaledVector(f, heli.speed);
     heli.leave();
-    rider.startFlying(door, heli.yaw + 0.5, 15);
+    rider.startFlying(d.pos, Math.atan2(dir.x, -dir.z), Math.min(22, dir.length()));
     game.mode = 'run'; hud.show(true);
     chase.snap(rider);
     ach.unlock('heli');
   }
+}
+
+// ---------- racing ----------
+const raceHudEl = document.getElementById('race-hud'), raceResultEl = document.getElementById('race-result');
+const nameEl = document.getElementById('racer-name');
+try { nameEl.value = localStorage.getItem('snowRacerName') || ''; } catch {}
+nameEl.addEventListener('change', () => { try { localStorage.setItem('snowRacerName', nameEl.value.trim()); } catch {} });
+const racerName = () => nameEl.value.trim() || 'Player';
+let raceResultT = 0, raceDelta = null;
+function updateRace(dt) {
+  for (const ev of race.update(dt, rider, racerName(), game.sport)) {
+    if (ev.type === 'start') { hud.popup('GO!', 0); raceDelta = null; }
+    else if (ev.type === 'gate') raceDelta = ev.delta;
+    else if (ev.type === 'miss') { hud.popup('Missed gate <small>+2 s</small>', 0, true); raceDelta = ev.delta; }
+    else if (ev.type === 'abort') hud.popup(`Race over: ${ev.why}`, 0, true);
+    else if (ev.type === 'finish') {
+      const head = ev.pr ? (ev.prev === null ? 'First time on the board!' : `New personal best! (was ${fmtRace(ev.prev)})`) : `Your best: ${fmtRace(race.best)}`;
+      raceResultEl.innerHTML = `<h2>🏁 ${fmtRace(ev.time)}</h2><div class="${ev.pr ? 'pr' : ''}">${head}</div>` +
+        `<div class="muted">${ev.missed ? `${ev.missed} missed gate${ev.missed > 1 ? 's' : ''} (+${ev.missed * 2} s)` : 'Clean run, every gate'}</div>` +
+        `<div class="panel-title" style="margin-top:10px">Fastest on this device</div>${race.leaderboardHtml(ev.time)}`;
+      raceResultEl.classList.remove('hidden'); raceResultT = 8;
+      ach.unlock('race_finish');
+      if (!ev.missed) ach.unlock('race_clean');
+      if (ev.pr && ev.prev !== null) ach.unlock('race_pr');
+      if (!ev.missed && ev.time < 50) ach.unlock('race_fast');
+    }
+  }
+  if (race.state === 'running') {
+    const pb = race.best !== null ? `<small>Best ${fmtRace(race.best)}</small>` : '';
+    const d = raceDelta === null ? '' : `<small class="${raceDelta < 0 ? 'ahead' : 'behind'}">${raceDelta < 0 ? '−' : '+'}${Math.abs(raceDelta).toFixed(2)}</small>`;
+    raceHudEl.innerHTML = `🏁 ${fmtRace(race.t + race.penalty)}<small>Gate ${Math.min(race.next + 1, race.gates.length)} / ${race.gates.length}</small>${d}${pb}`;
+    raceHudEl.classList.remove('hidden');
+  } else raceHudEl.classList.add('hidden');
+  if (raceResultT > 0) { raceResultT -= dt; if (raceResultT <= 0) raceResultEl.classList.add('hidden'); }
 }
 
 // ---------- achievements ----------
@@ -335,6 +378,8 @@ let chairIdx = 0, hlSel = 0;
 let glide = null;
 function startLift(l = lifts[0], doGlide = false) {
   curLift = l;
+  if (race.state === 'running') race.abort();
+  raceHudEl.classList.add('hidden');
   document.querySelector('#lift-ui .lift-name').textContent = '🚡 ' + l.name;
   game.mode = 'liftwait';
   hud.show(false);
@@ -375,7 +420,7 @@ function updateLoading(dt) {
   if (L.phase === 'wait') {
     // a chair just coming round the wheel: step out behind it
     for (let i = 0; i < n; i++) { const du = chairDu(l, i); if (du > WAIT_U + FOLLOW_GAP && du < WAIT_U + FOLLOW_GAP + 0.8) { L.ahead = i; L.phase = 'follow'; break; } }
-    if (L.phase === 'wait') { document.getElementById('lift-status').textContent = 'Wait for the chair in front to pass…'; return; }
+    if (L.phase === 'wait') { animatePush(dt, false); document.getElementById('lift-status').textContent = 'Wait for the chair in front to pass…'; return; }
     chairIdx = (L.ahead - 1 + n) % n;     // the chair behind it is yours
   }
   if (L.phase === 'follow') {
@@ -387,12 +432,21 @@ function updateLoading(dt) {
     rider.vel.copy(l.f).multiplyScalar((L.uP - prev) / Math.max(dt, 1e-4));
     terrain.normalAt(rider.pos.x, rider.pos.z, rider.normal);
     document.getElementById('lift-status').textContent = L.uP >= l.loadU - 0.01 ? 'Sit back as the chair comes…' : 'Follow the chair to the blue line…';
+    animatePush(dt, L.uP - prev > 0.0005);
     if (L.uP >= l.loadU - 0.01) { L.phase = 'ready'; rider.vel.set(0, 0, 0); }
   }
+  if (L.phase === 'ready') animatePush(dt, false);
+}
+
+// shuffle along in the lift line with the same one-foot push (or poles) you use on flats
+function animatePush(dt, moving) {
+  rider.pushAmt += ((moving ? 1 : 0) - rider.pushAmt) * (1 - Math.exp(-6 * dt));
+  if (rider.pushAmt > 0.02) rider.pushPhase = (rider.pushPhase + dt * 1.3) % 1; else rider.pushPhase = 0;
 }
 
 function updateGlide(dt) {
-  glide.t = Math.min(1, glide.t + dt / 0.7);
+  animatePush(dt, true);
+  glide.t = Math.min(1, glide.t + dt / 1.1);
   const e = glide.t * glide.t * (3 - 2 * glide.t);
   const p = glide.from.clone().lerp(linePoint(curLift, WAIT_U), e);
   p.y = terrain.heightAt(p.x, p.z);
@@ -404,6 +458,7 @@ function updateGlide(dt) {
   if (glide.t >= 1) {
     glide = null; rider.brakeAmt = 0; rider.vel.set(0, 0, 0);
   }
+  return;
 }
 
 // Riding into a lift line ends the run.
@@ -580,6 +635,7 @@ function updateLiftCamera() {
 
 function showMenu() {
   game.mode = 'menu';
+  race.reset(); raceHudEl.classList.add('hidden'); raceResultEl.classList.add('hidden');
   heli.hide(); heliUi.classList.add('hidden');
   camBlend = null;
   glide = null;
@@ -656,6 +712,7 @@ function handleEvents() {
 // ---------- loop ----------
 const STEP = 1 / 120;
 let acc = 0;
+const prevPos = new THREE.Vector3(), realPos = new THREE.Vector3();
 let last = performance.now();
 let fpsT = 0, fpsN = 0;
 window.__fps = 0;
@@ -710,15 +767,21 @@ function tick(dt, now) {
     if (inp.pausePressed) game.paused = !game.paused;
     acc += game.paused ? 0 : dt;
     while (acc >= STEP) {
+      prevPos.copy(rider.pos);
       rider.step(STEP, inp);
       acc -= STEP;
     }
     handleEvents();
     if (!game.started && rider.speed > 0.5) game.started = true;
     if (game.started && !game.paused) game.time += dt;
+    // draw the rider (and aim the camera) between the last two physics steps, so fast motion is smooth
+    // instead of stuttering when a frame happens to get one or three steps
+    realPos.copy(rider.pos);
+    if (prevPos.distanceToSquared(realPos) < 9) rider.pos.lerpVectors(prevPos, realPos, acc / STEP);
     rider.updateVisual(dt, inp);
     if (!game.paused) recorder.record(dt, rider);
     chase.update(dt, rider);
+    rider.pos.copy(realPos);
     if (runCamBlend) {
       // ease the camera from the chair view to behind you
       runCamBlend.t = Math.min(1, runCamBlend.t + dt / 1.3);
@@ -765,6 +828,7 @@ function tick(dt, now) {
     }
     if (game.mode === 'run') updateLiftGuide();
     if (game.mode === 'run') trackAch(dt);
+    if (game.mode === 'run') updateRace(dt);
     // stopped on a flat: remind how to push along
     const slow = game.mode === 'run' && rider.state === 'ride' && rider.speed < 1.2 && !inLane && rider.pushAmt < 0.2;
     pushHint.t = slow ? pushHint.t + dt : 0;
