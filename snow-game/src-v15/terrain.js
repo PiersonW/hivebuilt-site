@@ -5,12 +5,13 @@ import { fbm, noise2, rng, smoothstep } from './noise.js';
 import { makeRuns, DIFF, RUN_STEP } from './runs.js';
 
 export const CELL = 3;                     // grid spacing (m)
-export const WORLD = { x0: -390, x1: 390, zTop: 90, zBot: -1490 };
+export const WORLD = { x0: -390, x1: 390, zTop: 660, zBot: -1490 };   // north of the summit (+z) is the backside bowl
 export const SUMMIT = { x: 50, z: 26 };    // top of the mountain / Summit Express
 export const RIDGE_TOP = { x: -300, z: -612 };
 export const EXPRESS_TOP = { x: 86, z: 26 };    // Summit Express top station, right of the summit
 export const BASE_Z = -1370;               // top of the base area
-export const LIFT_BOTTOMS = { express: { x: 140, z: -1404 }, ridge: { x: -262, z: -1404 } };
+export const LIFT_BOTTOMS = { express: { x: 140, z: -1404 }, ridge: { x: -262, z: -1404 }, backside: { x: 22, z: 588 } };
+export const BACKSIDE_TOP = { x: 2, z: 34 };    // Backside Lift top, on the ridge just west of the summit
 
 const GROOM_FADE = 18;                     // m from a run's edge to untouched snow
 // jump sizes: [lip angle vs slope, length, width]
@@ -46,6 +47,16 @@ const GULLIES = [
   [[[-272, -150], [-280, -260], [-270, -380], [-278, -530]], 13, 7],
   [[[182, -600], [188, -700], [180, -790], [195, -860]], 12, 6],
   [[[262, -990], [270, -1090], [262, -1180], [268, -1260]], 13, 6],
+  // backside bowl: three narrow chutes through the rock bands in the headwall
+  [[[-40, 38], [-38, 90], [-42, 150]], 7, 5],
+  [[[90, 40], [92, 95], [88, 150]], 7, 5],
+  [[[200, 45], [198, 95], [203, 150]], 7, 5],
+];
+// Spines in the backside bowl: sharp-crested ridges running down the fall line to carve along. [a, b, height, half width]
+const SPINES = [
+  [[-75, 90], [-62, 330], 9, 22],
+  [[155, 95], [168, 300], 8, 20],
+  [[38, 200], [30, 380], 6, 18],
 ];
 // Ridges you can launch off (gentle ramp up, steep drop on the downhill side): [a, b, height]
 const RIDGES = [
@@ -58,6 +69,8 @@ const RIDGES = [
 const CLIFFS = [
   [[150, -478], [205, -490], 6],
   [[-168, -1122], [-140, -1130], 5],
+  // rock bands across the backside headwall (they face north, down into the bowl), with the chutes in the gaps
+  [[-150, 84], [-52, 88], 6, true], [[-28, 88], [78, 90], 6, true], [[102, 90], [188, 88], 6, true], [[212, 88], [290, 84], 6, true],
 ];
 // Snow-covered rocks that kick you into the air: [x, z, radius, height]
 const SNOW_ROCKS = [
@@ -68,17 +81,22 @@ const SNOW_ROCKS = [
   [-2, -250, 2.8, 1.5], [5, -420, 3, 1.6],
   [-150, -1060, 3, 1.6], [-145, -1215, 2.8, 1.5],
   [-245, -960, 3, 1.7], [-250, -1130, 3, 1.6],
+  // boulders in the backside bowl
+  [-100, 180, 3, 1.8], [-20, 240, 3.2, 1.9], [65, 165, 2.8, 1.6], [120, 260, 3, 1.8], [205, 205, 3, 1.7],
+  [-55, 395, 3.2, 1.9], [-10, 320, 2.8, 1.6], [150, 400, 3, 1.8], [90, 450, 3, 1.6], [-140, 300, 3, 1.8],
 ];
 // A hidden yeti (way out on the right-hand valley wall; easiest to reach from the air)
 export const YETI = { x: 362, z: -560 };
 // a line segment's frame: along (ex, ez), downhill-side normal (nx, nz), length
-function segFrame([a, b]) {
+function segFrame([a, b], north = false) {
   let ex = b[0] - a[0], ez = b[1] - a[1]; const len = Math.hypot(ex, ez); ex /= len; ez /= len;
-  let nx = -ez, nz = ex; if (nz > 0) { nx = -nx; nz = -nz; }
+  // the "downhill" side: -z on the front of the mountain, +z in the backside bowl
+  let nx = -ez, nz = ex; if ((nz > 0) !== north) { nx = -nx; nz = -nz; }
   return { ax: a[0], az: a[1], ex, ez, nx, nz, len };
 }
 const RIDGE_F = RIDGES.map(([a, b, H]) => ({ ...segFrame([a, b]), H }));
-const CLIFF_F = CLIFFS.map(([a, b, drop]) => ({ ...segFrame([a, b]), drop }));
+const CLIFF_F = CLIFFS.map(([a, b, drop, north]) => ({ ...segFrame([a, b], !!north), drop }));
+const SPINE_F = SPINES.map(([a, b, H, w]) => ({ ...segFrame([a, b]), H, w }));
 const GULLY_F = GULLIES.map(([pts, hw, depth]) => {
   const segs = []; let L = 0;
   for (let i = 0; i < pts.length - 1; i++) { const f = segFrame([pts[i], pts[i + 1]]); f.s0 = L; L += f.len; segs.push(f); }
@@ -112,6 +130,8 @@ const PADS = [
   { x: EXPRESS_TOP.x, z: EXPRESS_TOP.z - 4, r: 14 },
   { x: LIFT_BOTTOMS.express.x - 4, z: LIFT_BOTTOMS.express.z - 10, r: 30 },   // flat lift-line areas at the base
   { x: LIFT_BOTTOMS.ridge.x - 4, z: LIFT_BOTTOMS.ridge.z - 10, r: 30 },
+  { x: LIFT_BOTTOMS.backside.x - 2, z: LIFT_BOTTOMS.backside.z + 8, r: 26 },   // bottom of the backside bowl
+  { x: BACKSIDE_TOP.x + 4, z: BACKSIDE_TOP.z - 6, r: 16, level: 0 },   // level with the summit flat, so you roll across to the front runs
 ];
 
 export class Terrain {
@@ -143,7 +163,14 @@ export class Terrain {
   // ---------- shape of the mountain ----------
   // Slope (rise/run) along the fall line, s = meters below the summit.
   _steep(s) {
-    if (s < 0) return -0.3;                                  // falls away behind the summit
+    if (s < 0) {
+      // the backside bowl (north of the summit): a gentle crest, a steep headwall, an open powder bowl,
+      // a flat floor at the Backside Lift and a wall rising behind it
+      const b = -s;
+      const rate = 0.15 + 0.70 * smoothstep(6, 20, b) - 0.35 * smoothstep(95, 130, b) - 0.25 * smoothstep(280, 320, b)
+        - 0.19 * smoothstep(440, 480, b) - 0.36 * smoothstep(548, 578, b) - 0.012 * Math.max(0, b - 578);
+      return -rate;
+    }
     let k = 0.21;
     k += 0.21 * smoothstep(90, 280, s);                       // steep middle
     k += 0.05 * Math.sin(s / 95);                            // rolls and steps
@@ -153,9 +180,11 @@ export class Terrain {
   }
 
   _buildElevationTable() {
-    this.eS0 = -150; this.E = new Float32Array(1900);
-    let h = 1000 + 0.3 * 150;
+    this.eS0 = -800; this.E = new Float32Array(2550);
+    let h = 0;
     for (let i = 0; i < this.E.length; i++) { this.E[i] = h; h -= this._steep(this.eS0 + i); }
+    const off = 1090 - this.E[-this.eS0];        // summit stays at the same height as before
+    for (let i = 0; i < this.E.length; i++) this.E[i] += off;
   }
 
   _elev(s) {
@@ -169,7 +198,7 @@ export class Terrain {
     for (const p of PADS) {
       const d = Math.hypot(x - p.x, z - p.z);
       if (d < p.r + 25) {
-        if (p.h === undefined) p.h = this._natural(p.x, p.z);
+        if (p.h === undefined) p.h = p.level !== undefined ? (PADS[p.level].h ?? (PADS[p.level].h = this._natural(PADS[p.level].x, PADS[p.level].z))) : this._natural(p.x, p.z);
         h += (p.h - h) * (1 - smoothstep(p.r, p.r + 25, d));
       }
     }
@@ -180,8 +209,9 @@ export class Terrain {
   _natural(x, z) {
     const s = SUMMIT.z - z;
     let h = this._elev(s);
-    // summit is a peak: the top falls off to the sides
-    h -= 0.16 * Math.abs(x - SUMMIT.x) * Math.max(0, 1 - Math.max(0, s) / 450);
+    // summit is a peak: the top falls off to the sides (on the front); behind it the bowl's rim rises to the sides
+    h -= 0.16 * Math.abs(x - SUMMIT.x) * (s >= 0 ? Math.max(0, 1 - s / 450) : 1 - smoothstep(10, 70, -s));
+    if (s < 0) h += 0.0007 * (x - 40) * (x - 40) * smoothstep(15, 120, -s);
     // valley walls at the edges of the resort
     const ax = Math.abs(x);
     if (ax > 255) { const e = ax - 255; h += 0.12 * e + 0.0011 * e * e; }
@@ -213,6 +243,14 @@ export class Terrain {
       const te = smoothstep(-2, 8, u) * smoothstep(-2, 8, r.len - u);
       const prof = v <= -16 ? 0 : v <= 0 ? Math.pow((v + 16) / 16, 1.5) : 1 - smoothstep(0, 3.5, v);
       h += r.H * te * Math.max(0, prof);
+    }
+    for (const p of SPINE_F) {
+      const dx = x - p.ax, dz = z - p.az, u = dx * p.ex + dz * p.ez;
+      if (u < -30 || u > p.len + 30) continue;
+      const uc = Math.max(0, Math.min(p.len, u)), d = Math.hypot(x - p.ax - p.ex * uc, z - p.az - p.ez * uc);
+      if (d >= p.w) continue;
+      const te = smoothstep(-25, 20, u) * smoothstep(-25, 20, p.len - u);
+      h += p.H * te * Math.pow(1 - d / p.w, 1.5);      // sharp crest, steep flanks
     }
     for (const c of CLIFF_F) {
       const dx = x - c.ax, dz = z - c.az, u = dx * c.ex + dz * c.ez, v = dx * c.nx + dz * c.nz;
@@ -985,7 +1023,7 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
       const tx = x + (r() - 0.5) * sp * 0.9, tz = z + (r() - 0.5) * sp * 0.9;
       const s = SUMMIT.z - tz;
       let dens = 0.8 + 0.45 * fbm(tx / 90, tz / 90, 3);
-      dens *= 0.15 + 0.85 * smoothstep(40, 160, s);              // sparse above the tree line
+      dens *= 0.15 + 0.85 * smoothstep(40, 160, s) + 0.25 * smoothstep(330, 460, -s);   // sparse above the tree line (a few low in the bowl)
       if (tz < BASE_Z + 10) dens *= 0.12;                       // open base area
       if (r() > dens) continue;
       const q = this._q(tx, tz);

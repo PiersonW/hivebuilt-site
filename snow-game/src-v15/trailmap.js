@@ -116,6 +116,9 @@ export class TrailMap {
     this._label(g, 'BASE LODGE', lx, ly + 13, '#5a3418', 'center', 11);
     const [sx, sy] = this.toMap(50, 30);
     this._label(g, '▲ SUMMIT', sx, sy - 4, '#14213a', 'center', 12);
+    const [bx, by] = this.toMap(40, 330);
+    this._label(g, 'BACKSIDE BOWL', bx, by, '#14213a', 'center', 13);
+    this._label(g, 'powder · chutes · boulders', bx, by + 14, '#14213a', 'center', 10);
   }
 
   _path(g, run) {

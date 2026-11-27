@@ -23,7 +23,10 @@ export const ACHIEVEMENTS = [
   { id: 'speed', icon: '⚡', name: 'Speed Demon', desc: 'Hit 65 mph.', group: 'Tricks' },
   // places
   { id: 'runs', icon: '🗺️', name: 'Mountain Tour', desc: 'Ride every run on the mountain.', group: 'Explore', goal: 8 },
-  { id: 'lifts', icon: '🚡', name: 'Lift Lapper', desc: 'Ride both chairlifts.', group: 'Explore', goal: 2 },
+  { id: 'lifts', icon: '🚡', name: 'Lift Lapper', desc: 'Ride all three chairlifts.', group: 'Explore', goal: 3 },
+  { id: 'bowl', icon: '🏔️', name: 'Backside', desc: 'Drop into the backside bowl.', group: 'Explore' },
+  { id: 'bowl_chute', icon: '⬇️', name: 'Chute Out', desc: 'Ride down one of the backside chutes.', group: 'Explore' },
+  { id: 'bowl_chutes', icon: '🧭', name: 'Chute Collector', desc: 'Ride all three backside chutes.', group: 'Explore', goal: 3 },
   { id: 'pipe', icon: '🛹', name: 'Pipe Dream', desc: 'Land an air in the halfpipe.', group: 'Explore' },
   { id: 'pipe_big', icon: '🚀', name: 'Above the Lip', desc: 'Get 3 m above the halfpipe lip.', group: 'Explore' },
   { id: 'gullies', icon: '🏞️', name: 'Gully Hunter', desc: 'Ride all three gullies.', group: 'Explore', goal: 3 },

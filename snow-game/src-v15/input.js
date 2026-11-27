@@ -27,11 +27,16 @@ export class Input {
     this.padName = null;
     window.addEventListener('keydown', (e) => {
       if (e.target && e.target.tagName === 'INPUT') { if (e.code === 'Enter' || e.code === 'Escape') e.target.blur(); return; }   // typing your name
+      // a menu button can keep keyboard focus after a click: don't let Space / Enter / arrows press it again
+      if (e.target && e.target.tagName === 'BUTTON' && (e.code === 'Space' || e.code === 'Enter' || e.code.startsWith('Arrow'))) { e.preventDefault(); e.target.blur(); }
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
       this.keys.add(e.code);
       if (!e.repeat) this.tapped.add(e.code);
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('keyup', (e) => {
+      this.keys.delete(e.code);
+      if (e.target && e.target.tagName === 'BUTTON' && (e.code === 'Space' || e.code === 'Enter')) e.preventDefault();
+    });
     window.addEventListener('blur', () => this.keys.clear());
     // mouse drag to look around (lift ride and replays)
     this.mdx = 0; this.mdy = 0; this.dragging = false;

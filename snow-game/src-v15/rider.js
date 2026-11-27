@@ -845,6 +845,7 @@ export class Rider {
     this.gear.visible = false;
     this._wings(true);
     this.chute = false; this._canopy(false);
+    this.flyJumpReady = false;     // the jump press that got you out of the helicopter doesn't count
   }
 
   // The parachute: a ram-air canopy above you on lines down to your shoulders.
@@ -883,7 +884,9 @@ export class Rider {
   _fly(dt, input) {
     const T = TUNE;
     const W0 = this.terrain, alt = this.pos.y - W0.heightAt(this.pos.x, this.pos.z);
-    if (!this.chute && alt < 15.24 && this.vel.y < 0) this._openChute();       // 50 ft
+    if (!input.jump) this.flyJumpReady = true;
+    if (!this.chute && this.flyJumpReady && input.jump && alt > 1) this._openChute();   // jump button: pull the chute now
+    if (!this.chute && alt < 15.24 && this.vel.y < 0) this._openChute();       // otherwise it opens by itself at 50 ft
     if (this.chute) {
       // under canopy: slow to a gentle glide and steer with ← →
       this.flyYaw += (input.steer || 0) * 0.9 * dt;

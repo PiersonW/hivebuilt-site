@@ -1,6 +1,6 @@
 // Game setup and main loop.
 import * as THREE from 'three';
-import { Terrain, BASE_Z, RIDGE_TOP, EXPRESS_TOP, LIFT_BOTTOMS } from './terrain.js';
+import { Terrain, BASE_Z, RIDGE_TOP, EXPRESS_TOP, LIFT_BOTTOMS, BACKSIDE_TOP } from './terrain.js';
 import { setupSky, buildRange, buildLodge } from './scenery.js';
 import { Rider } from './rider.js';
 import { TrickTracker } from './tricks.js';
@@ -52,6 +52,7 @@ const SUN_OFFSET = SUN_DIR.clone().multiplyScalar(150);
 const LIFTS = [
   { name: 'Summit Express', bottom: new THREE.Vector3(LIFT_BOTTOMS.express.x, 0, LIFT_BOTTOMS.express.z), top: new THREE.Vector3(EXPRESS_TOP.x, 0, EXPRESS_TOP.z), speed: 13 },
   { name: 'Ridge Lift', bottom: new THREE.Vector3(LIFT_BOTTOMS.ridge.x, 0, LIFT_BOTTOMS.ridge.z), top: new THREE.Vector3(RIDGE_TOP.x, 0, RIDGE_TOP.z + 6), speed: 10 },
+  { name: 'Backside Lift', bottom: new THREE.Vector3(LIFT_BOTTOMS.backside.x, 0, LIFT_BOTTOMS.backside.z), top: new THREE.Vector3(BACKSIDE_TOP.x, 0, BACKSIDE_TOP.z), speed: 10 },
 ];
 const terrain = new Terrain(scene, { sunDir: SUN_DIR, shadowRes: LOW_GFX ? 1.5 : 1.0, treeSpacing: LOW_GFX ? 12 : 9.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
 buildRange(scene, terrain);
@@ -192,6 +193,8 @@ document.getElementById('btn-ski').onclick = () => setSport('ski');
 // Start a run at the top (or at `at`, e.g. the lift unload point).
 function startRun(at = null, yaw = 0) {
   game.mode = 'run';
+  // drop keyboard focus from the menu (a focused button or the name box would eat the arrow keys)
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
   race.reset(); raceHudEl.classList.add('hidden');
   game.paused = false; game.runsVisited = []; game.score = 0; game.time = 0; game.crashes = 0; game.bestTrick = null; game.tricksLanded = 0; game.started = false;
   rider.topSpeed = 0;
@@ -352,7 +355,7 @@ function onLandAch(res, parts, airTime) {
   if (a.pipe.u > 0 && a.pipe.u < P.L && Math.abs(a.pipe.l) > PIPE.fw + PIPE.wallW + 0.5 && Math.abs(a.pipe.l) < PIPE.outer && Math.abs(b.pipe.l) > PIPE.outer + 2) ach.unlock('cliffhanger');
 }
 // every frame while riding
-const gullyTime = [0, 0, 0];
+const gullyTime = [0, 0, 0, 0, 0, 0];
 function trackAch(dt) {
   const st = rider.state;
   if ((st === 'ride' || st === 'air') && rider.speed >= 64.5 / 2.237) ach.unlock('speed');
@@ -361,7 +364,12 @@ function trackAch(dt) {
   if (st === 'ride') {
     if (terrain.groomAt(rider.pos.x, rider.pos.z) < 0.3) ach.addCount('powder', rider.speed * dt);
     const g = terrain.landformAt(rider.pos.x, rider.pos.z).gully;
-    if (g && g.d < g.hw * 0.8) { gullyTime[g.i] += dt; if (gullyTime[g.i] > 2) ach.addToSet('gullies', 'g' + g.i); }
+    if (g && g.d < g.hw * 0.8) {
+      gullyTime[g.i] += dt;
+      if (g.i < 3 && gullyTime[g.i] > 2) ach.addToSet('gullies', 'g' + g.i);
+      if (g.i >= 3 && gullyTime[g.i] > 1.5) { ach.unlock('bowl_chute'); ach.addToSet('bowl_chutes', 'c' + g.i); }    // backside chutes
+    }
+    if (rider.pos.z > 140) ach.unlock('bowl');
   }
   if (Math.hypot(rider.pos.x - YETI.x, rider.pos.z - YETI.z) < 14) ach.unlock('yeti');
   const last = game.runsVisited[game.runsVisited.length - 1];
@@ -484,16 +492,21 @@ let inLane = null;
 // where the lift line starts (between the ropes, at the back of the line)
 function laneEntrance(l) { return l.bottom.clone().addScaledVector(l.f, l.lane.d0 - 3).addScaledVector(l.p, (l.lane.l0 + l.lane.l1) / 2); }
 function updateLiftGuide() {
+  if (rider.state !== 'fly') {
+    let near = Infinity;
+    for (const l of lifts) { const e = laneEntrance(l); near = Math.min(near, Math.hypot(e.x - rider.pos.x, e.z - rider.pos.z)); }
+    if (near > 230 && !inLane) { liftGuideEl.classList.add('hidden'); return; }
+  }
   if (rider.state === 'fly') {
     const above = Math.max(0, rider.pos.y - terrain.heightAt(rider.pos.x, rider.pos.z));
     const ft = Math.round(above * 3.281);
     liftGuideEl.innerHTML = rider.chute
       ? `🪂 Parachute open · ${ft} ft<br><small>← → steer · you'll touch down and ride away</small>`
-      : `🦅 Wingsuit · ${ft} ft above the snow<br><small>↓ dive · ↑ flare · ← → turn · parachute opens at 50 ft</small>`;
+      : `🦅 Wingsuit · ${ft} ft above the snow<br><small>↓ dive · ↑ flare · ← → turn · Space / A opens the parachute (it opens by itself at 50 ft)</small>`;
     liftGuideEl.classList.remove('hidden');
     return;
   }
-  if (rider.pos.z > BASE_Z + 160) { liftGuideEl.classList.add('hidden'); return; }
+
   if (inLane) {
     liftGuideEl.innerHTML = `🚡 ${inLane.name}<br><small>Ride to the end of the ropes, then follow the chair in front</small>`;
     liftGuideEl.classList.remove('hidden');
