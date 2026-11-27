@@ -1,6 +1,7 @@
 // Game setup and main loop.
 import * as THREE from 'three';
-import { Terrain, RUN_LENGTH, centerX } from './terrain.js';
+import { Terrain, BASE_Z, RIDGE_TOP, EXPRESS_TOP } from './terrain.js';
+import { setupSky, buildRange, buildLodge } from './scenery.js';
 import { Rider } from './rider.js';
 import { TrickTracker } from './tricks.js';
 import { Input } from './input.js';
@@ -23,64 +24,35 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = !LOW_GFX;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.95;
+renderer.toneMappingExposure = 0.5;
 
 const scene = new THREE.Scene();
-const SKY_FOG = 0xb9d4ee;
-scene.fog = new THREE.Fog(SKY_FOG, 70, 420);
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2500);
+const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 15000);
 
-// sky dome with a vertical gradient
-{
-  const geo = new THREE.SphereGeometry(1500, 24, 12);
-  const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { top: { value: new THREE.Color(0x4f8fdc) }, bottom: { value: new THREE.Color(SKY_FOG) } },
-    vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: 'uniform vec3 top; uniform vec3 bottom; varying vec3 vP; void main(){ float h = clamp(normalize(vP).y * 2.2, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, h), 1.0); }',
-  });
-  const sky = new THREE.Mesh(geo, mat);
-  sky.renderOrder = -1;
-  scene.add(sky);
-  scene.userData.sky = sky;
-}
-
-// lights
-const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x5d6f8f, 0.85);
+// sky, sunlight and haze
+const { sun: SUN_DIR } = setupSky(scene, renderer, { elevation: 30, azimuth: 205 });
+scene.fog = new THREE.FogExp2(0xa9c3e0, 0.00038);
+const hemi = new THREE.HemisphereLight(0xdfeaff, 0x7a8aa8, 0.3);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xfff1dc, 2.4);
-sun.castShadow = true;
+const sun = new THREE.DirectionalLight(0xfff0dc, 4.2);
+sun.castShadow = !LOW_GFX;
 sun.shadow.mapSize.set(2048, 2048);
-const sc = sun.shadow.camera; sc.left = -35; sc.right = 35; sc.top = 35; sc.bottom = -35; sc.near = 1; sc.far = 200;
-sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.04;
+const sc = sun.shadow.camera; sc.left = -45; sc.right = 45; sc.top = 45; sc.bottom = -45; sc.near = 1; sc.far = 400;
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05;
 scene.add(sun, sun.target);
-const SUN_OFFSET = new THREE.Vector3(-55, 45, 20);
+const SUN_OFFSET = SUN_DIR.clone().multiplyScalar(150);
 
-const terrain = new Terrain(scene);
-
-// distant low-poly peaks (not fogged so they read as a skyline)
-{
-  const mat = new THREE.MeshStandardMaterial({ color: 0xdde8f5, flatShading: true, fog: false, roughness: 1 });
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x8d9ab0, flatShading: true, fog: false, roughness: 1 });
-  let seed = 3; const r = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  for (let i = 0; i < 34; i++) {
-    const a = (i / 34) * Math.PI * 2 + r() * 0.1;
-    const d = 900 + r() * 300;
-    const hgt = 180 + r() * 260;
-    const geo = new THREE.ConeGeometry(160 + r() * 140, hgt, 5 + Math.floor(r() * 3));
-    const m = new THREE.Mesh(geo, i % 3 ? mat : rockMat);
-    m.position.set(Math.cos(a) * d, terrain.baseAt(RUN_LENGTH / 2) - 260 + hgt / 2 + r() * 80, -RUN_LENGTH / 2 + Math.sin(a) * d);
-    m.rotation.y = r() * 3;
-    scene.add(m);
-  }
-}
-
-// one chairlift from the bottom of the run back to the top
-const lift = new Chairlift(scene, terrain,
-  new THREE.Vector3(centerX(RUN_LENGTH + 70) + 30, 0, -(RUN_LENGTH + 70)),
-  new THREE.Vector3(centerX(-22) + 24, 0, 22),
-  { name: 'Summit Express', speed: 22 });
-const trailMap = new TrailMap(terrain, [lift], 'Main Run');
+// lifts (defined first so the forest leaves their lines open)
+const LIFTS = [
+  { name: 'Summit Express', bottom: new THREE.Vector3(140, 0, -1404), top: new THREE.Vector3(EXPRESS_TOP.x, 0, EXPRESS_TOP.z), speed: 26 },
+  { name: 'Ridge Lift', bottom: new THREE.Vector3(-262, 0, -1404), top: new THREE.Vector3(RIDGE_TOP.x, 0, RIDGE_TOP.z + 6), speed: 20 },
+];
+const terrain = new Terrain(scene, { treeSpacing: LOW_GFX ? 9.5 : 6.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
+buildRange(scene, terrain);
+buildLodge(scene, terrain, -40, BASE_Z - 68);
+const lifts = LIFTS.map(l => new Chairlift(scene, terrain, l.bottom, l.top, { name: l.name, speed: l.speed }));
+let curLift = lifts[0];
+const trailMap = new TrailMap(terrain, lifts);
 document.getElementById('map-wrap').appendChild(trailMap.canvas);
 
 const rider = new Rider(scene, terrain);
@@ -106,7 +78,7 @@ const flake = (() => {
   g.fillStyle = grd; g.fillRect(0, 0, 32, 32);
   return new THREE.CanvasTexture(c);
 })();
-const pMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.28, map: flake, transparent: true, opacity: 0.85, depthWrite: false });
+const pMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2, map: flake, transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false, fog: false });
 const points = new THREE.Points(pGeo, pMat);
 points.frustumCulled = false;
 scene.add(points);
@@ -139,7 +111,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lift, recorder, replayer }; // handy for debugging in the console
+window.__game = { IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, recorder, replayer, startLift: (i) => startLift(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -152,7 +124,7 @@ setStance(true);
 // Start a run at the top (or at `at`, e.g. the lift unload point).
 function startRun(at = null, yaw = 0) {
   game.mode = 'run';
-  game.paused = false; game.score = 0; game.time = 0; game.crashes = 0; game.bestTrick = null; game.tricksLanded = 0; game.started = false;
+  game.paused = false; game.runsVisited = []; game.score = 0; game.time = 0; game.crashes = 0; game.bestTrick = null; game.tricksLanded = 0; game.started = false;
   rider.topSpeed = 0;
   rider.reset(at || terrain.spawnPoint(), yaw);
   rider.events.length = 0;
@@ -173,16 +145,18 @@ const replayEl = document.getElementById('replay-ui');
 const liftCam = { yaw: 0, pitch: -0.3 };
 let chairIdx = 0, hlSel = 0;
 
-function startLift() {
+function startLift(l = lifts[0]) {
+  curLift = l;
+  document.querySelector('#lift-ui .lift-name').textContent = '🚡 ' + l.name;
   game.mode = 'liftwait';
   finishEl.classList.add('hidden');
   hud.show(false);
   liftEl.classList.remove('hidden');
   replayEl.classList.add('hidden');
-  rider.reset(lift.loadPoint, Math.atan2(lift.f.x, -lift.f.z));
+  rider.reset(curLift.loadPoint, Math.atan2(curLift.f.x, -curLift.f.z));
   rider.vel.set(0, 0, 0);
   chase.snap(rider);
-  chairIdx = lift.nextChairToLoad().index;
+  chairIdx = curLift.nextChairToLoad().index;
   hlSel = 0;
   renderHighlights();
   document.getElementById('lift-status').textContent = 'Wait for the chair…';
@@ -191,21 +165,22 @@ function startLift() {
 function boardChair() {
   game.mode = 'lift';
   // look out over the run: toward the run side (+p) and back downhill
-  const d = lift.p.clone().multiplyScalar(1).addScaledVector(lift.f, -0.9);
+  const d = curLift.p.clone().multiplyScalar(1).addScaledVector(curLift.f, -0.9);
   liftCam.yaw = Math.atan2(d.x, d.z); liftCam.pitch = -0.42;
 }
 
 function skipLift() {
   if (game.mode === 'liftwait') boardChair();
   replayer.stop();
-  lift.setChairU(chairIdx, lift.unloadU);
+  curLift.setChairU(chairIdx, curLift.unloadU);
 }
 
 function unload() {
-  const p = lift.unloadPoint.clone();
-  // ride off toward the start of the run
-  const tx = centerX(8), tz = -8;
-  const yaw = Math.atan2(tx - p.x, -(tz - p.z));
+  const p = curLift.unloadPoint.clone();
+  // ride off down the nearest run
+  const ra = terrain.runAt(p.x, p.z);
+  const t = ra ? ra.run.at(Math.min(ra.run.length, ra.s + 40)) : { x: p.x, z: p.z - 10 };
+  const yaw = Math.atan2(t.x - p.x, -(t.z - p.z));
   startRun(p, yaw);
 }
 
@@ -269,7 +244,7 @@ function liftInput(inp, dt) {
 
 function updateLiftCamera() {
   // sit just outside the chair on the run side, a little behind and above the seat
-  const eye = lift.chairToWorld(chairIdx, new THREE.Vector3(1.25, -1.0, 1.3));
+  const eye = curLift.chairToWorld(chairIdx, new THREE.Vector3(1.25, -1.0, 1.3));
   const d = new THREE.Vector3(Math.sin(liftCam.yaw) * Math.cos(liftCam.pitch), Math.sin(liftCam.pitch), Math.cos(liftCam.yaw) * Math.cos(liftCam.pitch));
   camera.position.copy(eye);
   camera.lookAt(eye.add(d));
@@ -287,6 +262,13 @@ function showMenu() {
   chase.snap(rider);
 }
 
+// "Main Street → Crossover → Long Haul" (ignores quick crossings under 2 s)
+function runsSummary() {
+  const out = [];
+  for (const r of game.runsVisited) if (r.t > 2 && out[out.length - 1] !== r.name) out.push(r.name);
+  return out.join(' → ');
+}
+
 function finishRun() {
   game.mode = 'finish';
   recorder.finishRun();
@@ -296,6 +278,7 @@ function finishRun() {
     ['Score', game.score.toLocaleString()],
     ['Tricks landed', game.tricksLanded],
     ['Best trick', game.bestTrick ? `${game.bestTrick.name} (${game.bestTrick.points.toLocaleString()})` : '—'],
+    ['Runs', runsSummary() || '—'],
     ['Top speed', `${Math.round(rider.topSpeed * 2.237)} mph`],
     ['Crashes', game.crashes],
   ];
@@ -313,7 +296,8 @@ document.getElementById('btn-regular').onclick = () => setStance(true);
 document.getElementById('btn-goofy').onclick = () => setStance(false);
 document.getElementById('btn-start').onclick = () => startRun();
 document.getElementById('btn-restart').onclick = () => startRun();
-document.getElementById('btn-lift').onclick = () => startLift();
+document.getElementById('btn-lift').onclick = () => startLift(lifts[0]);
+document.getElementById('btn-lift2').onclick = () => startLift(lifts[1]);
 
 function handleEvents() {
   for (const ev of rider.events) {
@@ -336,11 +320,15 @@ function handleEvents() {
       emit(50, rider.pos, rider.vel, 4);
     } else if (ev.type === 'respawn') {
       // put the rider back near the crash spot, nudged toward the middle of the run, facing downhill
-      const s = -rider.pos.z;
-      const cx = centerX(s + 3);
-      const x = rider.pos.x + (cx - rider.pos.x) * 0.5;
-      const z = Math.min(rider.pos.z, -6) - 3;
-      rider.reset(new THREE.Vector3(x, terrain.heightAt(x, z), z), Math.atan2(centerX(s + 13) - centerX(s + 3), 10));
+      const ra = terrain.runAt(rider.pos.x, rider.pos.z);
+      let x = rider.pos.x, z = rider.pos.z - 3, yaw = 0;
+      if (ra) {
+        const c = ra.run.at(ra.s + 4), ahead = ra.run.at(ra.s + 14);
+        const k = ra.d > ra.run.hw * 0.6 ? 0.6 : 0.15;           // move back toward the middle of the run
+        x = rider.pos.x + (c.x - rider.pos.x) * k; z = rider.pos.z + (c.z - rider.pos.z) * k;
+        yaw = Math.atan2(ahead.x - c.x, -(ahead.z - c.z));
+      }
+      rider.reset(new THREE.Vector3(x, terrain.heightAt(x, z), z), yaw);
       hud.clearPopups();
     } else {
       tricks.handle(ev);
@@ -409,9 +397,20 @@ function tick(dt, now) {
     }
     hud.update({ score: game.score, time: game.time, speed: rider.state === 'crash' ? 0 : rider.speed, live: rider.state === 'air' ? tricks.liveName() : '' });
 
-    if (-rider.pos.z >= RUN_LENGTH && rider.state !== 'crash') finishRun();
+    // which run are we on? (for the HUD and the run summary)
+    const ra = terrain.runAt(rider.pos.x, rider.pos.z);
+    const onRun = ra && ra.d < ra.run.hw + 4 ? ra.run : null;
+    hud.setRun(onRun);
+    if (onRun && rider.state !== 'crash') {
+      const last = game.runsVisited[game.runsVisited.length - 1];
+      if (!last || last.id !== onRun.id) game.runsVisited.push({ id: onRun.id, name: onRun.name, t: 0 });
+      game.runsVisited[game.runsVisited.length - 1].t += dt;
+    }
+
+    if (rider.pos.z <= BASE_Z && rider.state !== 'crash') finishRun();
   } else if (game.mode === 'finish') {
-    if (inp.confirmPressed) startLift();
+    if (inp.confirmPressed) startLift(lifts[0]);
+    else if (inp.padTaps.has(BTN.X) || inp.taps.has('Digit2')) startLift(lifts[1]);
     else if (inp.restartPressed) startRun();
     else if (inp.menuPressed) showMenu();
     // let the rider coast through the runout behind the summary
@@ -424,35 +423,36 @@ function tick(dt, now) {
 
   else if (game.mode === 'liftwait' || game.mode === 'lift') {
     liftInput(inp, dt);
-    if (!replayer.active) lift.update(dt);
     if (game.mode === 'liftwait') {
-      const u = lift.chairU(chairIdx);
-      if (u >= lift.loadU && u < lift.loadU + 10) boardChair();
+      const u = curLift.chairU(chairIdx);
+      if (u >= curLift.loadU && u < curLift.loadU + 10) boardChair();
       rider.updateVisual(dt, inp);
       chase.update(dt, rider);
     }
     if (game.mode === 'lift') {
-      const st = lift.chairState(chairIdx);
-      rider.sitAt(lift.seatPoint(chairIdx, -1), st.dir);
+      const st = curLift.chairState(chairIdx);
+      rider.sitAt(curLift.seatPoint(chairIdx, -1), st.dir);
       rider.updateVisual(dt, inp);
-      const left = lift.timeToTop(chairIdx);
+      const left = curLift.timeToTop(chairIdx);
       document.getElementById('lift-status').textContent = replayer.active ? 'Lift paused while you watch' : `${Math.ceil(left)} s to the top`;
       if (replayer.active) { replayer.update(dt); replayer.updateCamera(camera, dt, { x: inp.lookX + inp.mouseX * 0.4, y: inp.lookY + inp.mouseY * 0.4 }, terrain); }
       else updateLiftCamera();
-      if (st.u >= lift.unloadU && st.u < lift.unloadU + 15) unload();
+      if (st.u >= curLift.unloadU && st.u < curLift.unloadU + 15) unload();
     }
     trailMap.draw(rider.pos);
   }
 
+  if (!replayer.active) for (const l of lifts) l.update(dt);
+
   // wide view of the resort from the lift, normal fog while riding
-  scene.fog.far += ((game.mode === 'lift' && !replayer.active ? 1100 : 420) - scene.fog.far) * Math.min(1, dt * 2);
+  const fogWant = game.mode === 'lift' && !replayer.active ? 0.00022 : 0.00042;
+  scene.fog.density += (fogWant - scene.fog.density) * Math.min(1, dt * 2);
 
   updateParticles(dt);
   // shadow box follows the rider (or the replay)
   const focus = replayer.active ? replayer.pos : rider.pos;
   sun.position.copy(focus).add(SUN_OFFSET);
   sun.target.position.copy(focus);
-  scene.userData.sky.position.copy(camera.position);
 
   renderer.render(scene, camera);
 }

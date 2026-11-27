@@ -26,9 +26,10 @@ export const TUNE = {
   landSpinTol: 0.75,      // rad (~43 deg) off the travel line and you crash
   landFlipTol: 0.95,      // rad (~55 deg) off upright and you crash
   phantomTime: 0.75,
-  airGravity: 0.85,
-  maxLaunch: 7.5,
-  maxSpeed: 30,           // m/s (~67 mph) soft limit on the ground         // m/s off a kicker, measured away from the landing slope       // a little floaty in the air (arcade)
+  airGravity: 0.85,       // a little floaty in the air (arcade)
+  maxLaunch: 7.5,         // m/s off a kicker, measured away from the landing slope
+  maxSpeed: 26.5,         // m/s (~59 mph): above this the snow starts holding you back
+  topSpeed: 65 / 2.237,   // hard cap: 65 mph
   crashTime: 2.2,
 };
 
@@ -275,6 +276,9 @@ export class Rider {
     if (this.state === 'ride') this._ground(dt, input);
     else if (this.state === 'air') this._air(dt, input);
     else if (this.state === 'crash') this._crash(dt);
+    // hard top speed (65 mph), on the ground and in the air
+    const v = this.vel.length();
+    if (v > TUNE.topSpeed) this.vel.multiplyScalar(TUNE.topSpeed / v);
     const sp = this.speed;
     if (this.state === 'ride') this.topSpeed = Math.max(this.topSpeed, sp);
     // tree hits

@@ -7,7 +7,10 @@
 <meta name="robots" content="noindex">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
 </script>
 </head>
 <body>
@@ -17,8 +20,9 @@
   <div id="hud-top">
     <div class="stat"><span class="label">SCORE</span><span id="hud-score">0</span></div>
     <div class="stat"><span class="label">TIME</span><span id="hud-time">0:00.0</span></div>
-    <div class="stat"><span class="label">SPEED</span><span id="hud-speed">0</span><span class="unit">mph</span></div>
   </div>
+  <div id="run-tag"></div>
+  <div id="speedo"></div>
   <div id="trick-live"></div>
   <div id="popups"></div>
   <div id="controls-help"></div>
@@ -43,10 +47,11 @@
   <h1>Run complete</h1>
   <table id="summary"></table>
   <div class="btns">
-    <button id="btn-lift" class="big">Ride the lift up</button>
-    <button id="btn-restart" class="opt">Skip to the top</button>
+    <button id="btn-lift" class="big">🚡 Summit Express</button>
+    <button id="btn-lift2" class="big alt">🚡 Ridge Lift</button>
+    <button id="btn-restart" class="opt">Skip to the summit</button>
   </div>
-  <p class="hint">Enter / A: ride the lift · R / Menu: skip to the top · Esc / View: menu</p>
+  <p class="hint">Enter / A: Summit Express · 2 / X: Ridge Lift · R / Menu: skip to the summit · Esc / View: menu</p>
 </div>
 
 <div id="lift-ui" class="hidden">
@@ -74,6 +79,6 @@
   <div class="muted">Drag or right stick to orbit</div>
 </div>
 
-<script type="module" src="src/main.js?v=1"></script>
+<script type="module" src="src-v2/main.js"></script>
 </body>
 </html>

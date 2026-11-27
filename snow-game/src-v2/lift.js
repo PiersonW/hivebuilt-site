@@ -59,12 +59,11 @@ export class Chairlift {
       let d = this.length * i / n;
       const at = (dd) => this.bottom.clone().addScaledVector(this.f, dd);
       if (i > 0 && i < n) {
-        // don't put a tower on a kicker
-        for (let tries = 0; tries < 6; tries++) {
-          const q = at(d);
-          if (!T.kickers.some(k => Math.hypot(q.x - k.x, q.z - k.z) < k.len + 5)) break;
-          d += 9;
-        }
+        // keep towers off kickers and out of the runs (try nearby spots both ways)
+        const blocked = (q) => T.kickers.some(k => Math.hypot(q.x - k.x, q.z - k.z) < k.len + 5) ||
+          (T.edgeDist && T.edgeDist[T._q(q.x, q.z)] < 3);
+        const d0 = d;
+        for (let tries = 1; tries < 16 && blocked(at(d)); tries++) d = d0 + (tries % 2 ? 1 : -1) * Math.ceil(tries / 2) * 6;
       }
       const q = at(d);
       q.y = T.heightAt(q.x, q.z) + (i === 0 || i === n ? HANG + 0.55 : this.clearance + 2);
