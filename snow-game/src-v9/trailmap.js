@@ -72,6 +72,23 @@ export class TrailMap {
       g.strokeStyle = '#c0392b'; g.lineWidth = 3; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
       this._label(g, 'CLIFF', (x1 + x2) / 2, (y1 + y2) / 2 + 10, '#c0392b', 'center', 11);
     }
+    // natural cliffs, snow-covered rocks and the halfpipe
+    const mk = T.mapMarks || { cliffs: [], rocks: [] };
+    g.strokeStyle = '#c0392b'; g.lineWidth = 3;
+    for (const [[ax, az], [bx, bz]] of mk.cliffs) {
+      const [x1, y1] = this.toMap(ax, az), [x2, y2] = this.toMap(bx, bz);
+      g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+    }
+    g.fillStyle = '#5f5b58';
+    for (const [x, z] of mk.rocks) { const [px, py] = this.toMap(x, z); g.beginPath(); g.arc(px, py, 2.2, 0, Math.PI * 2); g.fill(); }
+    if (T.pipe) {
+      const P = T.pipe, w = 11;
+      const c = [[0, -w], [P.L, -w], [P.L, w], [0, w]].map(([u, l]) => this.toMap(P.ox + P.ax * u + P.cx * l, P.oz + P.az * u + P.cz * l));
+      g.fillStyle = 'rgba(42,100,200,0.35)'; g.strokeStyle = '#163566'; g.lineWidth = 1.5;
+      g.beginPath(); c.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.fill(); g.stroke();
+      const [mx, my] = this.toMap(P.ox + P.ax * P.L / 2 + P.cx * 22, P.oz + P.az * P.L / 2 + P.cz * 22);
+      this._label(g, 'HALFPIPE', mx, my, '#163566', 'center', 10);
+    }
     // lifts
     for (const lift of this.lifts) {
       const [ax, ay] = this.toMap(lift.bottom.x, lift.bottom.z), [bx, by] = this.toMap(lift.top.x, lift.top.z);

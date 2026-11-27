@@ -270,7 +270,7 @@ function boardChair() {
 
 function skipLift() {
   if (game.mode === 'liftwait') boardChair();
-  replayer.stop();
+  if (replayer.active) stopReplay();
   curLift.setChairU(chairIdx, curLift.unloadU);
 }
 
@@ -546,19 +546,19 @@ function tick(dt, now) {
       rider.sitAt(curLift.seatPoint(chairIdx, -1), st.dir);
       rider.updateVisual(dt, inp);
       const left = curLift.timeToTop(chairIdx);
-      document.getElementById('lift-status').textContent = replayer.active ? 'Lift paused while you watch' : `${Math.ceil(left)} s to the top`;
+      document.getElementById('lift-status').textContent = `${Math.ceil(left)} s to the top`;   // the lift keeps going while you watch
       if (replayer.active) {
         const k = (c) => input.keys.has(c);
         const kx = (k('ArrowRight') ? 1 : 0) - (k('ArrowLeft') ? 1 : 0), ky = (k('ArrowDown') ? 1 : 0) - (k('ArrowUp') ? 1 : 0);
         replayer.update(dt); replayer.updateCamera(camera, dt, { x: inp.lookX + kx + inp.mouseX * 0.4, y: inp.lookY + ky + inp.mouseY * 0.4 }, terrain);
       }
       else updateLiftCamera();
-      if (st.u >= curLift.unloadU && st.u < curLift.unloadU + 15) unload();
+      if (st.u >= curLift.unloadU && st.u < curLift.unloadU + 15) { if (replayer.active) stopReplay(); unload(); }
     }
     trailMap.draw(rider.pos);
   }
 
-  if (!replayer.active) for (const l of lifts) l.update(dt);
+  for (const l of lifts) l.update(dt);
   if (!(game.mode === 'run' && game.paused)) npcs.update(dt, camera.position, rider.pos);
 
   // wide view of the resort from the lift, normal fog while riding

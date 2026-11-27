@@ -28,7 +28,10 @@ export const RUN_DEFS = [
   },
   {
     id: 'park', name: 'The Yard', diff: 'park', width: 50,
-    pts: [[-106, -932], [-100, -1010], [-98, -1090], [-106, -1170], [-126, -1250], [-170, -1318], [-214, -1332]],
+    // branches off Long Haul near the top, runs the whole mountain (crossing Crossover and Ridge Run),
+    // with the halfpipe on the gentler lower section
+    pts: [[-50, -118], [-62, -220], [-70, -330], [-68, -440], [-55, -540], [-30, -650], [-10, -760], [-25, -860], [-80, -920],
+      [-100, -1010], [-98, -1090], [-106, -1170], [-126, -1250], [-170, -1318], [-214, -1332]],
   },
   {
     id: 'timber', name: 'Timber Line', diff: 'blue', width: 30,

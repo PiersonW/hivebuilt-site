@@ -23,17 +23,76 @@ const KICKERS = [
   ['timber', -980, 0, 0.5, 9, 7],
   ['ridge', -1050, 0, 0.55, 10, 8],
 ];
-// The Yard: three jump lines (small / medium / large side by side) and rails & boxes in between
+// The Yard: jump lines (small / medium / large side by side), rails & boxes, and a halfpipe.
+// Positions are by world z (the park runs steadily downhill).
 const PARK = {
   run: 'park',
-  jumps: [[70, [['S', -15], ['M', 0], ['L', 15]]], [200, [['S', -15], ['M', 0], ['L', 15]]], [325, [['M', -15], ['L', 0], ['XL', 15]]]],
+  jumps: [[-200, [['S', -15], ['M', 0], ['L', 15]]], [-330, [['S', -15], ['M', 0], ['L', 15]]], [-680, [['M', -15], ['L', 0], ['XL', 15]]], [-800, [['S', -15], ['M', 0], ['L', 15]]]],
   rails: [
-    // [s, offset, length, kind, height at start]
-    [135, -13, 12, 'rail', 0.3], [135, 0, 9, 'box', 0.25], [135, 13, 14, 'rail', 0.3],
-    [262, -12, 16, 'rail', 0.3], [262, 12, 10, 'box', 0.25],
-    [385, 0, 14, 'box', 0.25],
+    // [z, offset, length, kind, height at start]
+    [-265, -13, 12, 'rail', 0.3], [-265, 0, 9, 'box', 0.25], [-265, 13, 14, 'rail', 0.3],
+    [-400, -12, 16, 'rail', 0.3], [-400, 12, 10, 'box', 0.25],
+    [-740, -14, 12, 'rail', 0.3], [-740, 0, 14, 'box', 0.25],
+    [-1215, -12, 14, 'rail', 0.3], [-1215, 0, 10, 'box', 0.25], [-1215, 12, 12, 'rail', 0.3],
   ],
+  pipe: { z0: -1022, z1: -1148 },
 };
+// Halfpipe shape (m): flat bottom half-width, transition radius, wall height, deck width
+export const PIPE = { fw: 4.5, R: 5.5, H: 4.5, deck: 3 };
+PIPE.wallW = Math.sqrt(PIPE.R * PIPE.R - (PIPE.R - PIPE.H) ** 2);
+PIPE.outer = PIPE.fw + PIPE.wallW + PIPE.deck + PIPE.H * 1.5;
+// Off-piste landforms. Gullies (natural halfpipes): [centre line, half width, depth]
+const GULLIES = [
+  [[[-272, -150], [-280, -260], [-270, -380], [-278, -530]], 13, 7],
+  [[[182, -600], [188, -700], [180, -790], [195, -860]], 12, 6],
+  [[[262, -990], [270, -1090], [262, -1180], [268, -1260]], 13, 6],
+];
+// Ridges you can launch off (gentle ramp up, steep drop on the downhill side): [a, b, height]
+const RIDGES = [
+  [[150, -405], [200, -415], 3.2],
+  [[-28, -470], [8, -480], 3],
+  [[240, -935], [290, -950], 3.5],
+  [[-262, -575], [-228, -585], 3],
+];
+// Cliff bands: [a, b, drop]
+const CLIFFS = [
+  [[150, -478], [205, -490], 6],
+  [[-168, -1122], [-140, -1130], 5],
+];
+// Snow-covered rocks that kick you into the air: [x, z, radius, height]
+const SNOW_ROCKS = [
+  [-245, -210, 3, 1.6], [-250, -340, 2.8, 1.5], [-302, -465, 3, 1.7],
+  [170, -375, 3, 1.6], [200, -540, 2.8, 1.5], [168, -560, 3.2, 1.8],
+  [152, -650, 3, 1.6], [150, -760, 2.8, 1.5],
+  [238, -1160, 3, 1.6], [285, -1200, 3, 1.7],
+  [-2, -250, 2.8, 1.5], [5, -420, 3, 1.6],
+  [-150, -1060, 3, 1.6], [-145, -1215, 2.8, 1.5],
+  [-245, -960, 3, 1.7], [-250, -1130, 3, 1.6],
+];
+// a line segment's frame: along (ex, ez), downhill-side normal (nx, nz), length
+function segFrame([a, b]) {
+  let ex = b[0] - a[0], ez = b[1] - a[1]; const len = Math.hypot(ex, ez); ex /= len; ez /= len;
+  let nx = -ez, nz = ex; if (nz > 0) { nx = -nx; nz = -nz; }
+  return { ax: a[0], az: a[1], ex, ez, nx, nz, len };
+}
+const RIDGE_F = RIDGES.map(([a, b, H]) => ({ ...segFrame([a, b]), H }));
+const CLIFF_F = CLIFFS.map(([a, b, drop]) => ({ ...segFrame([a, b]), drop }));
+const GULLY_F = GULLIES.map(([pts, hw, depth]) => {
+  const segs = []; let L = 0;
+  for (let i = 0; i < pts.length - 1; i++) { const f = segFrame([pts[i], pts[i + 1]]); f.s0 = L; L += f.len; segs.push(f); }
+  const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
+  return { segs, L, hw, depth, x0: Math.min(...xs) - hw - 5, x1: Math.max(...xs) + hw + 5, z0: Math.min(...zs) - hw - 5, z1: Math.max(...zs) + hw + 5 };
+});
+// distance from (x, z) to a gully centre line -> { d, s }
+function gullyDist(g, x, z) {
+  let best = 1e9, bs = 0;
+  for (const f of g.segs) {
+    const u = Math.max(0, Math.min(f.len, (x - f.ax) * f.ex + (z - f.az) * f.ez));
+    const d = Math.hypot(x - f.ax - f.ex * u, z - f.az - f.ez * u);
+    if (d < best) { best = d; bs = f.s0 + u; }
+  }
+  return { d: best, s: bs };
+}
 const CLIFF = { run: 'chute', z: -560, drop: 7 };
 // Natural jumps: snow rolls shaped into the runs (a ramp up, then a quick drop). [run, s along run]
 const NATURAL_JUMPS = [
@@ -70,6 +129,7 @@ export class Terrain {
     this._buildMesh();
     this._buildKickers();
     this._buildPark();
+    this._buildFeatures();
     this._buildLogs();
     this._buildTrees();
     this._bakeShadows();
@@ -130,7 +190,54 @@ export class Terrain {
     h += 0.2 * fbm(x / 9, z / 9, 2);
     // past the lifts the base area turns uphill so you roll to a stop instead of leaving the mountain
     if (z < BASE_Z - 75) { const e = BASE_Z - 75 - z; h += 0.25 * e + 0.012 * e * e; }
+    return h + this._landforms(x, z);
+  }
+
+  // Gullies, launch ridges and cliff bands carved into the natural snow (off the groomed runs).
+  _landforms(x, z) {
+    let h = 0;
+    for (const g of GULLY_F) {
+      if (x < g.x0 || x > g.x1 || z < g.z0 || z > g.z1) continue;
+      const { d, s } = gullyDist(g, x, z);
+      if (d >= g.hw) continue;
+      const te = smoothstep(0, 25, s) * smoothstep(0, 25, g.L - s);
+      const t = d / g.hw;
+      h -= g.depth * te * (1 - t * t * t);        // wide floor, walls steepening toward a sharp rim
+    }
+    for (const r of RIDGE_F) {
+      const dx = x - r.ax, dz = z - r.az, u = dx * r.ex + dz * r.ez, v = dx * r.nx + dz * r.nz;
+      if (u < -3 || u > r.len + 3 || v < -17 || v > 4) continue;
+      const te = smoothstep(-2, 8, u) * smoothstep(-2, 8, r.len - u);
+      const prof = v <= -16 ? 0 : v <= 0 ? Math.pow((v + 16) / 16, 1.5) : 1 - smoothstep(0, 3.5, v);
+      h += r.H * te * Math.max(0, prof);
+    }
+    for (const c of CLIFF_F) {
+      const dx = x - c.ax, dz = z - c.az, u = dx * c.ex + dz * c.ez, v = dx * c.nx + dz * c.nz;
+      if (u < -14 || u > c.len + 14 || v < -2 || v > 75) continue;
+      const te = smoothstep(-12, 0, u) * smoothstep(-12, 0, c.len - u);
+      h -= c.drop * te * smoothstep(-0.5, 2.5, v) * (1 - smoothstep(12, 70, v));
+    }
     return h;
+  }
+
+  // Is (x, z) inside a landform, the halfpipe or a snow rock? (keeps trees and loose rocks out)
+  inFeature(x, z, margin = 0) {
+    for (const g of GULLY_F) {
+      if (x < g.x0 - margin || x > g.x1 + margin || z < g.z0 - margin || z > g.z1 + margin) continue;
+      if (gullyDist(g, x, z).d < g.hw + margin) return true;
+    }
+    for (const r of RIDGE_F) {
+      const dx = x - r.ax, dz = z - r.az, u = dx * r.ex + dz * r.ez, v = dx * r.nx + dz * r.nz;
+      if (u > -4 - margin && u < r.len + 4 + margin && v > -18 - margin && v < 22 + margin) return true;
+    }
+    for (const c of CLIFF_F) {
+      const dx = x - c.ax, dz = z - c.az, u = dx * c.ex + dz * c.ez, v = dx * c.nx + dz * c.nz;
+      if (u > -4 - margin && u < c.len + 4 + margin && v > -12 - margin && v < 30 + margin) return true;
+    }
+    if (this.pipe) { const P = this.pipe, dx = x - P.ox, dz = z - P.oz, u = dx * P.ax + dz * P.az, l = dx * P.cx + dz * P.cz;
+      if (u > -8 - margin && u < P.L + 8 + margin && Math.abs(l) < PIPE.outer + 3 + margin) return true; }
+    for (const b of this.snowRocks || []) if (Math.hypot(x - b.x, z - b.z) < b.r * 2.6 + 2 + margin) return true;
+    return false;
   }
 
   _buildHeights() {
@@ -259,7 +366,7 @@ export class Terrain {
 
   // Ground height including kickers.
   heightAt(x, z) {
-    let h = this.terrainHeight(x, z);
+    let h = this.terrainHeight(x, z) + this.bumpAt(x, z);
     for (const k of this.kickers) {
       const dx = x - k.x, dz = z - k.z;
       if (dx * dx + dz * dz > 150) continue;
@@ -270,12 +377,64 @@ export class Terrain {
     return h;
   }
 
+  // Extra height from the halfpipe walls and the snow-covered rocks (on top of the terrain grid).
+  bumpAt(x, z) {
+    let h = 0;
+    const P = this.pipe;
+    if (P) {
+      const dx = x - P.ox, dz = z - P.oz, u = dx * P.ax + dz * P.az;
+      if (u > -2 && u < P.L + 2) {
+        const l = dx * P.cx + dz * P.cz;
+        if (Math.abs(l) < PIPE.outer) h += 0.04 + this._pipeProfile(Math.abs(l)) * this._pipeTaper(u);
+      }
+    }
+    for (const b of this.snowRocks || []) {
+      const dx = x - b.x, dz = z - b.z;
+      if (dx * dx + dz * dz > b.R2) continue;
+      const u = dx * b.dx + dz * b.dz, v = -dx * b.dz + dz * b.dx;
+      if (Math.abs(v) > b.r || u < -b.Lu || u > b.r * 0.6) continue;
+      const fl = 1 - smoothstep(b.r * 0.35, b.r, Math.abs(v));
+      const fu = u < 0 ? Math.pow((u + b.Lu) / b.Lu, 1.6) : 1 - smoothstep(0, b.r * 0.6, u);
+      h += b.H * fl * fu;
+    }
+    return h;
+  }
+
+  snowRockNear(x, z) {
+    for (const b of this.snowRocks || []) if ((x - b.x) ** 2 + (z - b.z) ** 2 < b.R2) return b;
+    return null;
+  }
+
+  _pipeProfile(a) {
+    const { fw, R, H, deck, wallW } = PIPE;
+    if (a < fw) return 0;
+    let x = a - fw;
+    if (x < wallW) return R - Math.sqrt(R * R - x * x);
+    x -= wallW;
+    if (x < deck) return H;
+    x -= deck;
+    return Math.max(0, H - x / 1.5);
+  }
+
+  _pipeTaper(u) { return smoothstep(-2, 14, u) * (1 - smoothstep(this.pipe.L - 12, this.pipe.L + 2, u)); }
+
+  // In the halfpipe? -> { l (across, + = right wall), u (along), cx, cz (across unit), onWall } or null
+  pipeAt(x, z) {
+    const P = this.pipe;
+    if (!P) return null;
+    const dx = x - P.ox, dz = z - P.oz, u = dx * P.ax + dz * P.az;
+    if (u < 0 || u > P.L) return null;
+    const l = dx * P.cx + dz * P.cz;
+    if (Math.abs(l) > PIPE.fw + PIPE.wallW + 0.6) return null;
+    return { l, u, cx: P.cx, cz: P.cz, ax: P.ax, az: P.az, onWall: Math.abs(l) > PIPE.fw + 0.4 && this._pipeTaper(u) > 0.6 };
+  }
+
   normalAt(x, z, out = new THREE.Vector3()) {
     const e = 0.35;
     const hx = this.heightAt(x + e, z) - this.heightAt(x - e, z);
     const hz = this.heightAt(x, z + e) - this.heightAt(x, z - e);
     out.set(-hx, 2 * e, -hz).normalize();
-    if (out.y < 0.55) {   // kicker side walls are vertical; use the snow under them
+    if (out.y < 0.55 && !this.pipeAt(x, z)) {   // kicker side walls are vertical; use the snow under them
       const tx = this.terrainHeight(x + e, z) - this.terrainHeight(x - e, z);
       const tz = this.terrainHeight(x, z + e) - this.terrainHeight(x, z - e);
       out.set(-tx, 2 * e, -tz).normalize();
@@ -295,7 +454,7 @@ export class Terrain {
     const across = new THREE.Vector3(sx * 2 * e, hr - hl, sz * 2 * e);
     out.crossVectors(across, along).normalize();
     if (out.y < 0) out.negate();
-    if (out.y < 0.55) return this.normalAt(x, z, out);
+    if (out.y < 0.55 && !this.pipeAt(x, z)) return this.normalAt(x, z, out);
     return out;
   }
 
@@ -407,7 +566,7 @@ export class Terrain {
     const mat = new THREE.MeshStandardMaterial({ color: 0xeef4fb, roughness: 0.8, side: THREE.DoubleSide, normalMap: this.material.normalMap, normalScale: new THREE.Vector2(0.4, 0.4) });
     const lipMat = new THREE.MeshStandardMaterial({ color: 0x2a64c8, roughness: 0.6 });
     const list = KICKERS.map(([rid, zAt, off, lip, len, w]) => [rid, this.runById[rid].sAtZ(zAt), off, lip, len, w]);
-    for (const [s, line] of PARK.jumps) for (const [size, off] of line) list.push([PARK.run, s, off, ...JUMP[size]]);
+    for (const [zAt, line] of PARK.jumps) for (const [size, off] of line) list.push([PARK.run, this.runById[PARK.run].sAtZ(zAt), off, ...JUMP[size]]);
     this.parkMat = { mat, lipMat };
     for (const [rid, sAt, off, lipAngle, len, w] of list) {
       const run = this.runById[rid];
@@ -433,7 +592,8 @@ export class Terrain {
     const post = new THREE.MeshStandardMaterial({ color: 0x3a3f48, roughness: 0.6 });
     const boxTop = new THREE.MeshStandardMaterial({ color: 0xffd23a, roughness: 0.5 });
     const boxSide = new THREE.MeshStandardMaterial({ color: 0x23272e, roughness: 0.7 });
-    for (const [sAt, off, len, kind, h0] of PARK.rails) {
+    for (const [zAt, off, len, kind, h0] of PARK.rails) {
+      const sAt = run.sAtZ(zAt);
       const a = run.at(sAt), b = run.at(sAt + len);
       const px = -a.tz, pz = a.tx;
       const x0 = a.x + px * off, z0 = a.z + pz * off, x1 = b.x + px * off, z1 = b.z + pz * off;
@@ -486,6 +646,101 @@ export class Terrain {
     const banner = new THREE.Mesh(new THREE.BoxGeometry(hw * 2, 2, 0.2), new THREE.MeshStandardMaterial({ map: tex }));
     banner.position.set(a.x, topY, a.z); banner.rotation.y = Math.atan2(px, pz) - Math.PI / 2;
     this.scene.add(banner);
+  }
+
+  _inGullyOrPipe(x, z) {
+    if (GULLY_F.some(g => x > g.x0 && x < g.x1 && z > g.z0 && z < g.z1 && gullyDist(g, x, z).d < g.hw - 1)) return true;
+    if (this.pipeAt(x, z)) return true;
+    return (this.snowRocks || []).some(b => Math.hypot(x - b.x, z - b.z) < b.r * 2.6);
+  }
+
+  // The halfpipe and the snow-covered rocks (shape lives in bumpAt; these are the meshes).
+  _buildFeatures() {
+    const run = this.runById[PARK.run];
+    const a = run.at(run.sAtZ(PARK.pipe.z0)), b = run.at(run.sAtZ(PARK.pipe.z1));
+    let ax = b.x - a.x, az = b.z - a.z; const L = Math.hypot(ax, az); ax /= L; az /= L;
+    this.pipe = { ox: a.x, oz: a.z, ax, az, cx: -az, cz: ax, L };
+    const snowMat = new THREE.MeshStandardMaterial({ color: 0xf3f7fc, roughness: 0.8, normalMap: this.material.normalMap, normalScale: new THREE.Vector2(0.45, 0.45), polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    // pipe surface: fine across the walls, coarser on the floor and deck
+    const ls = [];
+    for (let l = 0; l <= PIPE.outer + 0.01;) { ls.push(l); l += l < PIPE.fw - 0.5 ? 0.75 : l < PIPE.fw + PIPE.wallW + 0.3 ? 0.25 : 0.75; }
+    const across = [...ls.slice(1).reverse().map(l => -l), ...ls];
+    const along = []; for (let u = -2; u <= L + 2.01; u += 0.8) along.push(u);
+    const P = this.pipe, pos = [], uv = [], idx = [], col = [];
+    for (const u of along) for (const l of across) {
+      const x = P.ox + ax * u + P.cx * l, z = P.oz + az * u + P.cz * l;
+      const edge = Math.abs(l) > PIPE.outer - 0.3 || u < -1.5 || u > L + 1.5;
+      pos.push(x, this.meshHeight(x, z) + this.bumpAt(x, z) + (edge ? 0 : 0.03), z); uv.push(x / 6, z / 6);
+      // a little shading so the walls read: darker down in the transitions, bright on the decks
+      const a = Math.abs(l), hh = this._pipeProfile(a) * this._pipeTaper(u) / PIPE.H;
+      let c = a < PIPE.fw ? 0.9 : a < PIPE.fw + PIPE.wallW ? 0.8 + 0.15 * hh : a < PIPE.fw + PIPE.wallW + PIPE.deck ? 0.98 : 0.95;
+      c = c + (1 - c) * (1 - this._pipeTaper(u)) * 0.6;
+      col.push(c * 0.95, c * 0.97, c);
+    }
+    const nA = across.length;
+    for (let i = 0; i < along.length - 1; i++) for (let j = 0; j < nA - 1; j++) {
+      const q = i * nA + j; idx.push(q, q + nA, q + 1, q + 1, q + nA, q + nA + 1);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    const fix = (g) => { const n = g.attributes.normal; for (let i = 0; i < n.count; i++) if (n.getY(i) < 0) n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i)); };
+    fix(geo);
+    const pipeMat = snowMat.clone(); pipeMat.vertexColors = true; pipeMat.color.set(0xffffff); pipeMat.roughness = 0.95;
+    const mesh = new THREE.Mesh(geo, pipeMat); mesh.receiveShadow = true; mesh.castShadow = true;
+    this.scene.add(mesh);
+    // blue lines along the lips so you can read the walls
+    const blue = new THREE.MeshStandardMaterial({ color: 0x2a64c8, roughness: 0.6 });
+    for (const sgn of [-1, 1]) {
+      const l = sgn * (PIPE.fw + PIPE.wallW + 0.15), pts = [];
+      for (let u = 12; u <= L - 10; u += 2) { const x = P.ox + ax * u + P.cx * l, z = P.oz + az * u + P.cz * l; pts.push(new THREE.Vector3(x, this.meshHeight(x, z) + this.bumpAt(x, z) + 0.05, z)); }
+      const strip = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 2, 0.07, 4), blue);
+      this.scene.add(strip);
+    }
+    // banner over the drop-in
+    const c = document.createElement('canvas'); c.width = 512; c.height = 96;
+    const gx = c.getContext('2d'); gx.fillStyle = '#163566'; gx.fillRect(0, 0, 512, 96);
+    gx.fillStyle = '#fff'; gx.font = 'bold 58px Trebuchet MS, sans-serif'; gx.textAlign = 'center'; gx.textBaseline = 'middle'; gx.fillText('HALFPIPE', 256, 52);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const postM = new THREE.MeshStandardMaterial({ color: 0x3a3f48 });
+    const bw = (PIPE.fw + PIPE.wallW + PIPE.deck) * 2, bx = P.ox - ax * 4, bz = P.oz - az * 4;
+    let topY = -Infinity;
+    for (const sgn of [-1, 1]) {
+      const x = bx + P.cx * sgn * bw / 2, z = bz + P.cz * sgn * bw / 2, y = this.terrainHeight(x, z);
+      topY = Math.max(topY, y + 8);
+      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.4, 9, 0.4), postM); pole.position.set(x, y + 4.5, z); this.scene.add(pole);
+    }
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(bw, 1.8, 0.2), new THREE.MeshStandardMaterial({ map: tex }));
+    banner.position.set(bx, topY, bz); banner.rotation.y = Math.atan2(P.cx, P.cz) - Math.PI / 2; this.scene.add(banner);
+
+    // snow-covered rocks: a long gentle ramp up, a lip, and a short steep face with rock showing
+    this.snowRocks = [];
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0x5f5b58, flatShading: true, roughness: 1 });
+    for (const [x, z, r, H] of SNOW_ROCKS) {
+      const n = this.normalAt(x, z);
+      let dx = n.x, dz = n.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;   // downhill
+      const b = { x, z, r, H, dx, dz, Lu: r * 2.2 };
+      b.R2 = (b.Lu + r) ** 2;
+      this.snowRocks.push(b);
+      const gp = [], gi = [], NU = 16, NV = 10;
+      for (let i = 0; i <= NU; i++) for (let j = 0; j <= NV; j++) {
+        const u = -b.Lu + (b.Lu + r * 0.6) * i / NU, v = -r + 2 * r * j / NV;
+        const px = x + dx * u - dz * v, pz = z + dz * u + dx * v;
+        gp.push(px, this.meshHeight(px, pz) + this.bumpAt(px, pz) + 0.02, pz);
+      }
+      for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) { const q = i * (NV + 1) + j; gi.push(q, q + 1, q + NV + 1, q + 1, q + NV + 2, q + NV + 1); }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(gp, 3)); g.setIndex(gi); g.computeVertexNormals(); fix(g);
+      const cap = new THREE.Mesh(g, snowMat); cap.receiveShadow = true; cap.castShadow = true; this.scene.add(cap);
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), rockMat);
+      const rx = x + dx * r * 0.45, rz = z + dz * r * 0.45;
+      rock.position.set(rx, this.terrainHeight(rx, rz) + H * 0.3, rz);
+      rock.scale.set(r * 0.75, H * 0.55, r * 0.45); rock.rotation.y = Math.atan2(dx, dz); rock.castShadow = true;
+      this.scene.add(rock);
+    }
+    this.mapMarks = { cliffs: CLIFF_F.map(c => [[c.ax, c.az], [c.ax + c.ex * c.len, c.az + c.ez * c.len]]), rocks: SNOW_ROCKS.map(([x, z]) => [x, z]) };
   }
 
   // Downed trees along the run edges: ride them like a rail.
@@ -662,6 +917,7 @@ export class Terrain {
       if (this.slopeAt(tx, tz) > 1.0) continue;
       if (PADS.some(p => Math.hypot(tx - p.x, tz - p.z) < p.r + 8)) continue;
       if (this.kickers.some(k => Math.hypot(tx - k.x, tz - k.z) < k.len + 8)) continue;
+      if (this.inFeature(tx, tz, 2)) continue;
       if (this.rails.some(rl => distToSeg(tx, tz, rl.p0, rl.p1) < 6)) continue;
       if (lifts.some(([a, b]) => distToSeg(tx, tz, a, b) < 8)) continue;
       const size = 0.75 + r() * 0.55 + 0.25 * smoothstep(300, 1200, s);
@@ -735,6 +991,7 @@ export class Terrain {
     for (let k = 0; k < 9000 && spots.length < 700; k++) {
       const x = WORLD.x0 + r() * (WORLD.x1 - WORLD.x0), z = WORLD.zTop - r() * (WORLD.zTop - WORLD.zBot);
       if (this.slopeAt(x, z) < 0.85 || this.edgeDist[this._q(x, z)] < 3) continue;
+      if (this._inGullyOrPipe(x, z)) continue;
       spots.push([x, z, 0.8 + r() * 2.2]);
     }
     // rocks along the cliff face
@@ -742,6 +999,11 @@ export class Terrain {
     for (let n = 0; n < 24; n++) {
       const a = run.at(run.cliffS + 1 + r() * 1.5), v = (r() - 0.5) * (run.width + 6);
       spots.push([a.x - a.tz * v, a.z + a.tx * v, 0.8 + r() * 1.4]);
+    }
+    // and along the natural cliff bands
+    for (const c of CLIFF_F) for (let n = 0; n < c.len / 1.6; n++) {
+      const u = r() * c.len, v = 0.6 + r() * 1.6;
+      spots.push([c.ax + c.ex * u + c.nx * v, c.az + c.ez * u + c.nz * v, 0.9 + r() * 1.5]);
     }
     const mat = new THREE.MeshStandardMaterial({ color: 0x6f6b68, flatShading: true, roughness: 1 });
     const im = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), mat, spots.length);

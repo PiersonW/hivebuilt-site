@@ -227,6 +227,10 @@ export class Npcs {
       const look = 9 + sp * 0.8 + Math.max(0, Math.min(60, d - run.width / 2));
       const a = run.at(s + look), hw = run.width / 2;
       let lat = (n.lane + n.swing * Math.sin(n.phase)) * (hw - 4);
+      // through the halfpipe: stay on the flat bottom
+      const P = T.pipe;
+      if (P) { const u = (a.x - P.ox) * P.ax + (a.z - P.oz) * P.az, u0 = (p.x - P.ox) * P.ax + (p.z - P.oz) * P.az;
+        if ((u > -25 && u < P.L + 5) || (u0 > -25 && u0 < P.L + 5)) lat = 0; }
       lat = Math.max(-(hw - 3), Math.min(hw - 3, lat));
       tx = a.x - a.tz * lat; tz = a.z + a.tx * lat;
       // give the player some room
@@ -248,7 +252,7 @@ export class Npcs {
     }
     const err = wrap(want - r.yaw);
     inp.steer = Math.max(-1, Math.min(1, err * 2.2));
-    const cruise = n.finishT > 0 ? 6 : n.cruise;
+    const cruise = n.finishT > 0 ? 6 : T.pipeAt(p.x, p.z) ? Math.min(n.cruise, 9) : n.cruise;
     if (sp > cruise + 1.5 || (Math.abs(err) > 1.2 && sp > 6)) inp.brake = true;
     else if (sp < cruise - 4 && Math.abs(err) < 0.25 && n.skill > 0.4) inp.down = true;
     if (sp < 2.5 && Math.abs(err) < 0.8) inp.up = true;            // push along the flats
