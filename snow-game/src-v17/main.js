@@ -16,6 +16,7 @@ import { Helicopter } from './heli.js';
 import { Achievements } from './achievements.js';
 import { Race, fmtRace } from './race.js';
 import { LongJump } from './longjump.js';
+import { Music } from './music.js';
 import { LONG_JUMP } from './terrain.js';
 import { YETI, PIPE } from './terrain.js';
 import { SKI_GRABS } from './rider.js';
@@ -69,6 +70,16 @@ const rider = new Rider(scene, terrain);
 const heli = new Helicopter(scene);
 const race = new Race(scene, terrain);
 const longJump = new LongJump(terrain);
+// background music (original pop-punk): starts on the first click / key / controller press (browser rule)
+const music = new Music();
+const musicBtns = [document.getElementById('btn-music'), document.getElementById('btn-music-lift')];
+function showMusicState() { for (const b of musicBtns) b.classList.toggle('on', music.enabled); }
+function toggleMusic() { music.toggle(); showMusicState(); }
+for (const b of musicBtns) b.onclick = (e) => { e.stopPropagation(); toggleMusic(); };
+showMusicState();
+const kickMusic = () => music.start();
+window.addEventListener('pointerdown', kickMusic);
+window.addEventListener('keydown', (e) => { if (e.code !== 'KeyN') kickMusic(); });
 const ach = new Achievements(document.getElementById('ach-toast'));
 // other skiers and snowboarders, on the runs and on the chairs
 const npcs = new Npcs(scene, terrain, {
@@ -171,7 +182,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
+window.__game = { music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -614,8 +625,22 @@ function renderHighlights() {
   const list = document.getElementById('hl-list');
   const hs = recorder.highlights;
   if (!hs.length) { list.innerHTML = '<p class="muted">No landed tricks this run yet. Hit a kicker!</p>'; return; }
-  list.innerHTML = hs.map((h, i) => `<button class="hl ${i === hlSel ? 'sel' : ''}" data-i="${i}"><b>${i + 1}</b> ${h.name}<span>${h.points.toLocaleString()}</span></button>`).join('');
+  const usePad = !!input.padName || IS_XBOX;
+  list.innerHTML = hs.map((h, i) => `<button class="hl ${i === hlSel ? 'sel' : ''}" data-i="${i}"><b>${i + 1}</b> ${h.name}<span>${h.points.toLocaleString()}</span>${usePad && i === hlSel ? '<em class="pad-badge">Ⓐ play</em>' : ''}</button>`).join('');
   list.querySelectorAll('.hl').forEach(b => b.onclick = () => playHighlight(+b.dataset.i));
+}
+
+// lift screen help: controller buttons when a controller is in use, keys otherwise
+let liftHelpPad = null;
+function updateLiftHelp() {
+  const usePad = !!input.padName || IS_XBOX;
+  if (usePad === liftHelpPad) return;
+  liftHelpPad = usePad;
+  document.getElementById('lift-hint').innerHTML = usePad
+    ? '🎮 <b>D-pad ↑ ↓</b> pick a highlight · <b>A</b> play it · <b>B</b> stop · <b>RB</b> show/hide highlights · <b>LB</b> map · <b>Y</b> achievements · <b>right stick</b> look around · <b>Menu</b> skip to the top'
+    : 'Look around: arrow keys, drag the mouse, or right stick · M / LB map · H / RB highlights · 1 / 2 / 3 replay · T / Y achievements · Enter / Menu skip to the top';
+  document.getElementById('hl-help').innerHTML = usePad ? '🎮 D-pad ↑ ↓ to pick, <b>A</b> to play · in the replay: X slow-mo, Y camera, B back' : '1 / 2 / 3 or click to replay';
+  renderHighlights();
 }
 
 function playHighlight(i) {
@@ -678,6 +703,8 @@ function liftInput(inp, dt) {
   if (tap('KeyH') || pad(BTN.RB)) togglePanel('hl');
   const n = recorder.highlights.length;
   for (let i = 0; i < n; i++) if (tap(`Digit${i + 1}`)) playHighlight(i);
+  // controller: D-pad picks a highlight (and opens the list if it's hidden), A plays it
+  if (pad(BTN.DOWN, BTN.UP) && panelPref.hl === false) togglePanel('hl');
   if (n && pad(BTN.DOWN)) { hlSel = (hlSel + 1) % n; renderHighlights(); }
   if (n && pad(BTN.UP)) { hlSel = (hlSel + n - 1) % n; renderHighlights(); }
   if (n && pad(BTN.A)) playHighlight(hlSel);
@@ -818,6 +845,8 @@ function tick(dt, now) {
 
   ach.update(dt);
   heli.update(dt);
+  if (inp.padTaps.size) kickMusic();
+  if (inp.taps.has('KeyN')) toggleMusic();
   if (achOpen) {
     // achievements panel is up: Esc / B / T / Y closes it, nothing else reacts
     if (inp.menuPressed || inp.taps.has('KeyT') || inp.padTaps.has(BTN.B) || inp.padTaps.has(BTN.Y)) toggleAch(false);
@@ -917,11 +946,12 @@ function tick(dt, now) {
     const slow = game.mode === 'run' && rider.state === 'ride' && rider.speed < 1.2 && !inLane && rider.pushAmt < 0.2;
     pushHint.t = slow ? pushHint.t + dt : 0;
     const showHint = pushHint.t > 1.2;
-    if (showHint) pushHintEl.textContent = input.padName ? 'Left stick up to push along · hold LT + left stick to look around' : 'Hold ↑ to push along · hold Shift + arrows to look around';
+    if (showHint) pushHintEl.textContent = input.padName ? 'Left stick up to push along (or climb a hill) · hold LT + left stick to look around' : 'Hold ↑ to push along (or climb a hill) · hold Shift + arrows to look around';
     pushHintEl.classList.toggle('hidden', !showHint);
   }
 
   else if (game.mode === 'liftwait' || game.mode === 'lift') {
+    updateLiftHelp();
     liftInput(inp, dt);
     if (game.mode === 'liftwait') {
       if (glide) updateGlide(dt);

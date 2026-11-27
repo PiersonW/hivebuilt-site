@@ -227,6 +227,14 @@ export class Rider {
       if (ski) { hipH -= push * 0.14 * stroke; lean += push * 0.45 * stroke; }      // fold over the poles as you push
       else { hipH -= push * 0.1; lean += push * 0.12; }                             // flex the front knee
     }
+    const climbing = this.state === 'ride' && this.climbing;
+    const cp = this.climbPhase || 0;
+    if (climbing && !ski) {
+      // on the knees, leaning into the hill; the board hops up as you push off your hands
+      const hop = Math.max(0, Math.sin(2 * Math.PI * (cp - 0.15)));
+      hipH = 0.5 - 0.06 * hop; lean = 0.85; boardLift = 0.16 * hop;
+    }
+    if (climbing && ski) { hipH = 0.86; lean = 0.22; }
     if (phantom) { hipH = 0.85; lean = 0.25; feetLift = 0.35; }
     if (crashing) { hipH = 0.95; lean = -0.2; }
     const seated = this.state === 'lift';
@@ -263,6 +271,17 @@ export class Rider {
 
     // feet on the bindings
     const bindings = ski ? [new THREE.Vector3(-0.14, 0.06, 0), new THREE.Vector3(0.14, 0.06, 0)] : [new THREE.Vector3(0, 0.07, -0.27), new THREE.Vector3(0, 0.07, 0.27)];
+    if (ski) {
+      // side-stepping: the uphill ski (+x) steps up, then the other one follows
+      if (!this._skiBase) this._skiBase = this.skisG.children.map(m => m.position.clone());
+      if (climbing) {
+        const a = 2 * Math.PI * cp;
+        const st = [{ x: -0.1 * Math.sin(a + Math.PI), y: 0.1 * Math.max(0, Math.sin(a + Math.PI)) }, { x: 0.1 * Math.sin(a), y: 0.1 * Math.max(0, Math.sin(a)) }];
+        this.skisG.children.forEach((m, i) => { const k = i < 4 ? 0 : 1; m.position.set(this._skiBase[i].x + st[k].x, this._skiBase[i].y + st[k].y, this._skiBase[i].z); });
+        bindings[0].x += st[0].x; bindings[0].y += st[0].y; bindings[1].x += st[1].x; bindings[1].y += st[1].y;
+        this.skiStep = st;
+      } else if (this.skiStep) this._resetSkiSteps();
+    }
     const bind = bindings.map(v => this._boardToBody(v, phantom));
     // board: unstrap the back foot and kick along on the snow beside the board (toe side)
     if (!ski && push > 0.02) {
@@ -399,6 +418,11 @@ export class Rider {
       t[1] = sh[1].clone().add(new THREE.Vector3(-0.12, 0.5 - Math.max(0, pull) * 0.25, 0.05));
     }
     if (seated) { t[0] = new THREE.Vector3(0.2, 0.62, 0.3); t[1] = new THREE.Vector3(-0.2, 0.62, 0.3); }
+    if (climbing && !ski) {
+      // hands planted in the snow up the hill, walking forward each hop
+      const reach = 0.42 + 0.12 * Math.sin(2 * Math.PI * cp);
+      t[0] = new THREE.Vector3(0.28, 0.1, reach + (cp < 0.5 ? 0.06 : 0)); t[1] = new THREE.Vector3(-0.28, 0.1, reach + (cp >= 0.5 ? 0.06 : 0));
+    }
     if (gettingUp && gu < 0.55) {   // hands push off the snow
       t[0] = new THREE.Vector3(0.35, 0.05, 0.35); t[1] = new THREE.Vector3(-0.35, 0.05, 0.35);
     }
@@ -458,6 +482,7 @@ export class Rider {
     this.crouch = 0; this.charge = 0; this.lean = 0; this.brakeAmt = 0;
     this.getupT = -1; this.rail = null; this.boardslide = 0; this.pipeAir = false; this.standT = 1;
     if (this.wingMesh && this.wingMesh.visible) { this._wings(false); this._orientBody(); }   // restarted mid-flight
+    this.climbing = false; this._resetSkiSteps();
     this.chute = false; if (this.canopy) this.canopy.visible = false;
     this.gear.visible = true;
     this.terrain.normalAt(pos.x, pos.z, this.normal);
@@ -491,7 +516,8 @@ export class Rider {
   step(dt, input) {
     if (this.state === 'lift' || this.state === 'heli') return;
     if (this.state === 'fly') { this._fly(dt, input); return; }
-    if (this.state === 'ride') this._ground(dt, input);
+    if (this.state === 'ride' && this.climbing) this._climb(dt, input);
+    else if (this.state === 'ride') this._ground(dt, input);
     else if (this.state === 'air') this._air(dt, input);
     else if (this.state === 'grind') this._grind(dt, input);
     else if (this.state === 'crash') this._crash(dt);
@@ -513,6 +539,11 @@ export class Rider {
     const T = TUNE, n = this.normal;
     this.terrain.normalBehind(this.pos.x, this.pos.z, this.vel.x, this.vel.z, n);
     const speed = this.speed;
+    // stopped (or nearly) on a slope too steep to push up, holding up: start climbing up it
+    if (!this.npc && input.up && !input.brake && speed < 2.5 && !this.terrain.pipeAt(this.pos.x, this.pos.z)) {
+      const g = Math.hypot(n.x, n.z) / Math.max(0.2, n.y);
+      if (g > 0.13) { this.climbing = true; this.climbYaw = Math.atan2(-n.x, n.z); this.climbPhase = 0; this.vel.set(0, 0, 0); return; }
+    }
     const tuck = input.down && !input.jump;
     const brake = input.brake;
     // hold up when slow: push yourself along (back foot out on the board, poles for skiers)
@@ -832,6 +863,41 @@ export class Rider {
       this.vel.set(Math.sin(this.yaw), 0, -Math.cos(this.yaw)).multiplyScalar(1.5);
       this.events.push({ type: 'recovered' });
     }
+  }
+
+  // ---------------- climbing ----------------
+  // Hold up to climb: snowboarders stay strapped in, on their knees facing the hill, hopping the board up;
+  // skiers turn their skis across the hill and side-step. Left/right angle the climb. Down, jump, or reaching
+  // the top lets you ride again; let go of up and you just hold your spot.
+  _climb(dt, input) {
+    const W = this.terrain, n = this.normal;
+    W.normalAt(this.pos.x, this.pos.z, n);
+    this.climbYaw += (input.steer || 0) * 0.9 * dt;
+    const dx = Math.sin(this.climbYaw), dz = -Math.cos(this.climbYaw);
+    const h0 = W.heightAt(this.pos.x, this.pos.z), along = (W.heightAt(this.pos.x + dx * 0.6, this.pos.z + dz * 0.6) - h0) / 0.6;
+    if (input.down || input.jump || along < 0.03) {
+      // done climbing: face where you were going and carry on riding
+      this.climbing = false; this.yaw = this.climbYaw; this.switch = false; this.vel.set(0, 0, 0);
+      this._resetSkiSteps();
+      return;
+    }
+    const moving = !!input.up;
+    const ski = this.sport === 'ski';
+    if (moving) this.climbPhase = (this.climbPhase + dt * (ski ? 1.8 : 1.4)) % 1;
+    const pulse = 1 + 0.9 * Math.sin(2 * Math.PI * this.climbPhase - Math.PI / 2);
+    const v = moving ? (ski ? 1.8 : 1.5) * pulse / (1 + along * 0.5) : 0;
+    const nx = this.pos.x + dx * v * dt, nz = this.pos.z + dz * v * dt;
+    if (!W.treeNear(nx, nz)) { this.pos.x = nx; this.pos.z = nz; }
+    this.pos.y = W.heightAt(this.pos.x, this.pos.z);
+    this.vel.set(dx * v, along * v, dz * v);
+    this.crouch = 0; this.lean = 0; this.brakeAmt = 0; this.spray = 0; this.pushAmt = 0;
+    this.yaw = this.climbYaw; this.switch = false;
+  }
+
+  _resetSkiSteps() {
+    if (!this._skiBase) return;
+    this.skisG.children.forEach((m, i) => m.position.copy(this._skiBase[i]));
+    this.skiStep = null;
   }
 
   // ---------------- wingsuit ----------------
@@ -1176,7 +1242,7 @@ export class Rider {
         const sx = Math.cos(this.yaw), sz = Math.sin(this.yaw);        // horizontal, across your travel
         const k = this.normal.x * sx + this.normal.z * sz;
         const inPipe = this.terrain.pipeAt && this.terrain.pipeAt(this.pos.x, this.pos.z);
-        const upright = inPipe ? 0 : 0.9 * (1 - smoothstep(0.38, 0.72, Math.abs(k)));
+        const upright = this.climbing ? 0.5 : inPipe ? 0 : 0.9 * (1 - smoothstep(0.38, 0.72, Math.abs(k)));
         alignN = this._alignN || (this._alignN = new THREE.Vector3());
         alignN.set(this.normal.x - upright * k * sx, this.normal.y, this.normal.z - upright * k * sz).normalize();
       }
@@ -1190,7 +1256,9 @@ export class Rider {
         // brake: skid the board sideways onto the edge you were riding (toe or heel)
         const faceSign = (this.regular ? 1 : -1) * (this.switch ? -1 : 1);
         const brakeTwist = this.sport === 'ski' ? this.brakeAmt * 1.25 * (this.brakeSide || 1) : this.brakeAmt * 1.25 * faceSign * this.brakeEdge;
-        const vis = this.yaw + (this.switch ? Math.PI : 0) + brakeTwist + this.boardslide * Math.PI / 2;
+        // climbing: board (or skis) across the hill, facing (snowboarder) or side-on to (skier) the climb
+        const vis = this.climbing ? this.climbYaw - (this.sport === 'ski' ? Math.PI / 2 : (this.regular ? 1 : -1) * Math.PI / 2)
+          : this.yaw + (this.switch ? Math.PI : 0) + brakeTwist + this.boardslide * Math.PI / 2;
         const leanSign = this.switch ? -1 : 1;
         const lean = this.sport === 'ski'
           ? -this.lean * leanSign - this.brakeAmt * 0.3 * (this.brakeSide || 1) * leanSign

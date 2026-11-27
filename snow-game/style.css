@@ -139,3 +139,4 @@ kbd { font-family: inherit; font-size: 10px; border: 1px solid rgba(255,255,255,
 #race-result h2 { margin: 0 0 4px; font-size: 30px; } #race-result .pr { color: #ffd23a; font-weight: bold; }
 .race-board { margin: 10px auto 0; border-collapse: collapse; font-size: 15px; }
 .race-board td { padding: 3px 10px; text-align: left; } .race-board tr.me td { color: #ffd23a; font-weight: bold; }
+.hl .pad-badge { font-style: normal; font-size: 12px; background: #2fbf71; color: #0b1d12; border-radius: 10px; padding: 1px 8px; margin-left: 8px; font-weight: bold; }
