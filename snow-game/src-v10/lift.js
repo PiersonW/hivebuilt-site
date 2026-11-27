@@ -21,7 +21,7 @@ export class Chairlift {
     this.terrain = terrain;
     this.name = opts.name || 'Chairlift';
     this.speed = opts.speed || 10;            // m/s along the cable between stations
-    this.slowSpeed = opts.slowSpeed || 1.1;   // m/s through the stations
+    this.slowSpeed = opts.slowSpeed || 1.6;   // m/s through the stations
     this.spacing = opts.spacing || 34;        // m between chairs
     this.towerSpacing = opts.towerSpacing || 75;
     this.clearance = opts.clearance || 9;     // min height of the cable above the snow between towers
@@ -240,7 +240,7 @@ export class Chairlift {
     // lift line at the bottom: two rope fences you ride up between, then a blue line where you wait for the chair
     const ropeMat = new THREE.MeshStandardMaterial({ color: 0xff8a1f });
     const b0 = this.towers[0];
-    this.lane = { d0: -20, d1: this.loadU, l0: 0.6, l1: 4.2 };
+    this.lane = { d0: -20, d1: -2.4, l0: 0.6, l1: 4.2 };   // the line ends just behind the bull wheel; you step out to load
     for (const s of [0.6, 4.2]) {
       for (let d = -20; d <= -4; d += 4) {
         const q = b0.clone().addScaledVector(this.f, d).addScaledVector(this.p, s);

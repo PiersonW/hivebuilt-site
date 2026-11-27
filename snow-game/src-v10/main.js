@@ -12,6 +12,10 @@ import { Recorder, Replayer } from './replay.js';
 import { TrailMap } from './trailmap.js';
 import { BTN } from './input.js';
 import { Npcs } from './npcs.js';
+import { Helicopter } from './heli.js';
+import { Achievements } from './achievements.js';
+import { YETI, PIPE } from './terrain.js';
+import { SKI_GRABS } from './rider.js';
 
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('game');
@@ -58,6 +62,8 @@ const trailMap = new TrailMap(terrain, lifts);
 document.getElementById('map-wrap').appendChild(trailMap.canvas);
 
 const rider = new Rider(scene, terrain);
+const heli = new Helicopter(scene);
+const ach = new Achievements(document.getElementById('ach-toast'));
 // other skiers and snowboarders, on the runs and on the chairs
 const npcs = new Npcs(scene, terrain, {
   count: LOW_GFX ? 7 : 14, lifts, laneEntrance,
@@ -102,6 +108,7 @@ const points = new THREE.Points(pGeo, pMat);
 points.frustumCulled = false;
 scene.add(points);
 let pNext = 0;
+let powderAcc = 0;
 function emit(n, pos, vel, spread) {
   for (let i = 0; i < n; i++) {
     const k = pNext; pNext = (pNext + 1) % MAXP;
@@ -120,6 +127,35 @@ function updateParticles(dt) {
     pPos[k * 3] += pVel[k * 3] * dt; pPos[k * 3 + 1] += pVel[k * 3 + 1] * dt; pPos[k * 3 + 2] += pVel[k * 3 + 2] * dt;
   }
   pGeo.attributes.position.needsUpdate = true;
+}
+
+// ---------- powder clouds (riding off the groomed runs) ----------
+const MAXD = LOW_GFX ? 160 : 360;
+const dGeo = new THREE.BufferGeometry();
+const dPos = new Float32Array(MAXD * 3), dVel = new Float32Array(MAXD * 3), dLife = new Float32Array(MAXD);
+dGeo.setAttribute('position', new THREE.BufferAttribute(dPos, 3));
+const dMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.1, map: flake, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false });
+const dPoints = new THREE.Points(dGeo, dMat); dPoints.frustumCulled = false; scene.add(dPoints);
+let dNext = 0;
+function emitPowder(n, pos, vel, up = 1.5) {
+  for (let i = 0; i < n; i++) {
+    const k = dNext; dNext = (dNext + 1) % MAXD;
+    dPos[k * 3] = pos.x + (Math.random() - 0.5) * 0.8; dPos[k * 3 + 1] = pos.y + 0.15; dPos[k * 3 + 2] = pos.z + (Math.random() - 0.5) * 0.8;
+    dVel[k * 3] = vel.x * 0.25 + (Math.random() - 0.5) * 2.2;
+    dVel[k * 3 + 1] = up * (0.6 + Math.random());
+    dVel[k * 3 + 2] = vel.z * 0.25 + (Math.random() - 0.5) * 2.2;
+    dLife[k] = 0.9 + Math.random() * 0.8;
+  }
+}
+function updatePowder(dt) {
+  for (let k = 0; k < MAXD; k++) {
+    if (dLife[k] <= 0) { dPos[k * 3 + 1] = -9999; continue; }
+    dLife[k] -= dt;
+    const drag = Math.exp(-1.6 * dt);
+    dVel[k * 3] *= drag; dVel[k * 3 + 2] *= drag; dVel[k * 3 + 1] = dVel[k * 3 + 1] * drag - 1.2 * dt;   // hangs in the air
+    dPos[k * 3] += dVel[k * 3] * dt; dPos[k * 3 + 1] += dVel[k * 3 + 1] * dt; dPos[k * 3 + 2] += dVel[k * 3 + 2] * dt;
+  }
+  dGeo.attributes.position.needsUpdate = true;
 }
 
 // ---------- game state ----------
@@ -168,6 +204,125 @@ function startRun(at = null, yaw = 0) {
   glide = null;
   hud.show(true);
   hud.clearPopups();
+  runCamBlend = null;
+}
+
+// ---------- helicopter drop ----------
+const heliUi = document.getElementById('heli-ui');
+let heliCam = 0;
+function startHeli() {
+  startRun();
+  game.mode = 'heli';
+  hud.show(false);
+  heliUi.classList.remove('hidden');
+  const x = 40, z = -60, y = terrain.heightAt(x, z) + 120;
+  heli.hover(new THREE.Vector3(x, y, z), 0);
+  rider.state = 'heli';
+  rider.flip = 0; rider.alignQ.identity();
+  heliCam = 0;
+}
+function updateHeliMode(dt, inp) {
+  // fly the helicopter around to pick a spot: ← → sideways, ↑ ↓ up or down the mountain
+  const h = heli.home, sp = 22 * dt;
+  h.x = Math.max(-330, Math.min(330, h.x + (inp.steer || 0) * sp));
+  h.z = Math.max(-1250, Math.min(60, h.z + ((inp.down ? 1 : 0) - (inp.up ? 1 : 0)) * sp));
+  if (inp.menuPressed) { showMenu(); return; }
+  const want = Math.max(terrain.heightAt(h.x, h.z), terrain.heightAt(h.x, h.z - 60)) + 110;
+  h.y += (want - h.y) * Math.min(1, dt * 0.8);
+  heli.group.position.x = h.x; heli.group.position.z = h.z;
+  const door = heli.doorPoint();
+  rider.pos.copy(door); rider.yaw = heli.yaw + Math.PI / 2; rider.airYaw = rider.yaw;
+  rider.updateVisual(dt, {});
+  // camera: behind the helicopter's open door, looking down the mountain
+  heliCam += dt;
+  const cp = door.clone().add(new THREE.Vector3(9 + Math.sin(heliCam * 0.3) * 1.5, 3.5, 13));
+  camera.position.lerp(cp, heliCam < 0.05 ? 1 : 1 - Math.exp(-4 * dt));
+  camera.lookAt(door.x + 6, door.y - 30, door.z - 90);
+  if (Math.abs(camera.fov - 64) > 0.1) { camera.fov = 64; camera.updateProjectionMatrix(); }
+  if (inp.confirmPressed || inp.taps.has('Space') || inp.padTaps.has(BTN.A)) {
+    heliUi.classList.add('hidden');
+    heli.leave();
+    rider.startFlying(door, heli.yaw + 0.5, 15);
+    game.mode = 'run'; hud.show(true);
+    chase.snap(rider);
+    ach.unlock('heli');
+  }
+}
+
+// ---------- achievements ----------
+const achPanel = document.getElementById('ach-panel');
+let achOpen = false;
+function toggleAch(on) {
+  achOpen = on;
+  if (on) ach.render(document.getElementById('ach-body'));
+  achPanel.classList.toggle('hidden', !on);
+}
+const BOARD_GRAB = { ...Object.fromEntries(Object.entries(SKI_GRABS).map(([b, s]) => [s, b])), Indy: 'Indy', Melon: 'Melon', Method: 'Method', 'Nose Grab': 'Nose Grab' };
+let airCtx = null;
+const chuteRun = terrain.runById.chute, chuteIdx = terrain.runs.indexOf(chuteRun);
+function pipeCoords(p) { const P = terrain.pipe; const dx = p.x - P.ox, dz = p.z - P.oz; return { u: dx * P.ax + dz * P.az, l: dx * P.cx + dz * P.cz }; }
+function placeCtx(p) {
+  const q = terrain._q(p.x, p.z);
+  return { pos: p.clone(), land: terrain.landformAt(p.x, p.z), rock: terrain.snowRockIndex(p.x, p.z), lifts: lifts.map(l => l.laneCoords(p.x, p.z)),
+    chuteD: terrain.runDist[chuteIdx][q], chuteS: terrain.runS[chuteIdx][q], pipe: pipeCoords(p) };
+}
+function onTakeoffAch() { airCtx = placeCtx(rider.pos); airCtx.pipeAir = rider.pipeAir; airCtx.lipMax = 0; }
+function onLandAch(res, parts, airTime) {
+  if (airTime > 0.4) ach.unlock('first_air');
+  for (const p of parts) {
+    const n = p.name;
+    const deg = parseInt(n, 10);
+    if (deg >= 180) ach.unlock('spin180');
+    if (deg >= 360) ach.unlock('spin360');
+    if (deg >= 540) ach.unlock('spin540');
+    if (deg >= 720) ach.unlock('spin720');
+    if (deg >= 1080) ach.unlock('spin1080');
+    if (n.includes('Backflip')) ach.unlock('backflip');
+    if (n.includes('Front Flip')) ach.unlock('frontflip');
+    if (/Double|Triple|\dx /.test(n) && n.includes('lip')) ach.unlock('double');
+    if (n.includes('Phantom')) ach.unlock('phantom');
+    if (BOARD_GRAB[n]) ach.addToSet('grabs', BOARD_GRAB[n]);
+    if (/50-50|Slide|Boardslide|Log/.test(n)) ach.unlock('grind');
+    if (/Slide|Boardslide/.test(n)) ach.unlock('slide');
+    if (n.startsWith('Log')) ach.unlock('log');
+  }
+  if (res && res.mult >= 3) ach.unlock('combo3');
+  if (airTime >= 2.5) ach.unlock('hang');
+  if (!airCtx) return;
+  const a = airCtx, b = placeCtx(rider.pos);
+  if (a.pipeAir && airTime > 0.3) { ach.unlock('pipe'); if (a.lipMax >= 3) ach.unlock('pipe_big'); }
+  if (a.rock >= 0 && airTime > 0.4) ach.addToSet('rocks', a.rock);
+  if (a.land.ridge && a.land.ridge.v > -5 && a.land.ridge.v < 5 && airTime > 0.5) ach.unlock('ridge');
+  if (a.land.cliff && a.land.cliff.v > -8 && a.land.cliff.v < 3 && b.land.cliff && b.land.cliff.i === a.land.cliff.i && b.land.cliff.v > 4) { ach.unlock('cliff'); ach.addToSet('cliffs', 'c' + a.land.cliff.i); }
+  if (a.chuteD < chuteRun.hw + 8 && a.chuteS > chuteRun.cliffS - 14 && a.chuteS < chuteRun.cliffS + 1.5 && b.chuteS > chuteRun.cliffS + 3) {
+    ach.unlock('cliff'); ach.addToSet('cliffs', 'chute');
+    if (b.chuteS > chuteRun.cliffS + 25) ach.unlock('gap_chute');
+  }
+  lifts.forEach((l, i) => {
+    const c0 = a.lifts[i], c1 = b.lifts[i];
+    if (c0.d > 15 && c0.d < l.length - 15 && c1.d > 15 && c1.d < l.length - 15 && Math.sign(c0.l) !== Math.sign(c1.l) && Math.abs(c0.l) > 4 && Math.abs(c1.l) > 4) ach.unlock('gap_lift');
+  });
+  const g0 = a.land.gully, g1 = b.land.gully;
+  if (g0 && g1 && g0.i === g1.i && g0.side !== g1.side && g0.d > g0.hw - 4 && g1.d > g1.hw - 4) ach.unlock('gap_gully');
+  const P = terrain.pipe, lip = PIPE.fw + PIPE.wallW - 1;
+  if (a.pipe.u > 0 && a.pipe.u < P.L && b.pipe.u > 0 && b.pipe.u < P.L && Math.abs(a.pipe.l) > lip && Math.abs(b.pipe.l) > lip && Math.sign(a.pipe.l) !== Math.sign(b.pipe.l)) ach.unlock('gap_pipe');
+  if (a.pipe.u > 0 && a.pipe.u < P.L && Math.abs(a.pipe.l) > PIPE.fw + PIPE.wallW + 0.5 && Math.abs(a.pipe.l) < PIPE.outer && Math.abs(b.pipe.l) > PIPE.outer + 2) ach.unlock('cliffhanger');
+}
+// every frame while riding
+const gullyTime = [0, 0, 0];
+function trackAch(dt) {
+  const st = rider.state;
+  if ((st === 'ride' || st === 'air') && rider.speed >= 64.5 / 2.237) ach.unlock('speed');
+  if (game.score >= 10000) ach.unlock('score10k');
+  if (st === 'air' && airCtx && airCtx.pipeAir) airCtx.lipMax = Math.max(airCtx.lipMax, rider.pos.y - terrain.terrainHeight(rider.pos.x, rider.pos.z) - PIPE.H);
+  if (st === 'ride') {
+    if (terrain.groomAt(rider.pos.x, rider.pos.z) < 0.3) ach.addCount('powder', rider.speed * dt);
+    const g = terrain.landformAt(rider.pos.x, rider.pos.z).gully;
+    if (g && g.d < g.hw * 0.8) { gullyTime[g.i] += dt; if (gullyTime[g.i] > 2) ach.addToSet('gullies', 'g' + g.i); }
+  }
+  if (Math.hypot(rider.pos.x - YETI.x, rider.pos.z - YETI.z) < 14) ach.unlock('yeti');
+  const last = game.runsVisited[game.runsVisited.length - 1];
+  if (last && last.t > 3) ach.addToSet('runs', last.id);
 }
 
 // ---------- chairlift ride ----------
@@ -186,25 +341,60 @@ function startLift(l = lifts[0], doGlide = false) {
   liftEl.classList.remove('hidden');
   replayEl.classList.add('hidden');
   const loadYaw = Math.atan2(curLift.f.x, -curLift.f.z);
+  // you wait at the end of the ropes, just behind the bull wheel where no chair passes
+  loading = { phase: 'wait', uP: WAIT_U, ahead: -1 };
   if (doGlide) {
     glide = { from: rider.pos.clone(), yaw0: rider.yaw, yaw1: loadYaw, t: 0 };
     rider.reset(rider.pos.clone(), rider.yaw);
   } else {
     glide = null;
-    rider.reset(curLift.loadPoint, loadYaw);
+    rider.reset(linePoint(curLift, WAIT_U), loadYaw);
     chase.snap(rider);
   }
   rider.vel.set(0, 0, 0);
-  chairIdx = curLift.nextChairToLoad().index;
+  chairIdx = -1;
   hlSel = 0;
   renderHighlights();
   document.getElementById('lift-status').textContent = doGlide ? 'Getting in line…' : 'Wait for the chair…';
 }
 
+// Loading like a real detachable lift: chairs bunch up ~3 m apart through the station, so you step out
+// right behind a chair as it passes, follow it to the load spot, and the next chair scoops you up.
+const WAIT_U = -3.2;
+let loading = null;
+function linePoint(l, u) {
+  const p = l.bottom.clone().addScaledVector(l.f, u).addScaledVector(l.p, 2.3);
+  p.y = terrain.heightAt(p.x, p.z);
+  return p;
+}
+// distance of chair i past the start of the up line (negative = still coming round the bull wheel)
+function chairDu(l, i) { const u = l.chairU(i); return u > l.total / 2 ? u - l.total : u; }
+function updateLoading(dt) {
+  const l = curLift, L = loading, n = l.chairs.length;
+  const FOLLOW_GAP = l.slowSpeed * (l.period / n) / 2;      // half the gap between chairs in the station
+  if (L.phase === 'wait') {
+    // a chair just coming round the wheel: step out behind it
+    for (let i = 0; i < n; i++) { const du = chairDu(l, i); if (du > WAIT_U + FOLLOW_GAP && du < WAIT_U + FOLLOW_GAP + 0.8) { L.ahead = i; L.phase = 'follow'; break; } }
+    if (L.phase === 'wait') { document.getElementById('lift-status').textContent = 'Wait for the chair in front to pass…'; return; }
+    chairIdx = (L.ahead - 1 + n) % n;     // the chair behind it is yours
+  }
+  if (L.phase === 'follow') {
+    const want = Math.min(l.loadU, chairDu(l, L.ahead) - FOLLOW_GAP);
+    const prev = L.uP;
+    L.uP = Math.max(L.uP, want);
+    rider.pos.copy(linePoint(l, L.uP));
+    rider.yaw = Math.atan2(l.f.x, -l.f.z);
+    rider.vel.copy(l.f).multiplyScalar((L.uP - prev) / Math.max(dt, 1e-4));
+    terrain.normalAt(rider.pos.x, rider.pos.z, rider.normal);
+    document.getElementById('lift-status').textContent = L.uP >= l.loadU - 0.01 ? 'Sit back as the chair comes…' : 'Follow the chair to the blue line…';
+    if (L.uP >= l.loadU - 0.01) { L.phase = 'ready'; rider.vel.set(0, 0, 0); }
+  }
+}
+
 function updateGlide(dt) {
   glide.t = Math.min(1, glide.t + dt / 0.7);
   const e = glide.t * glide.t * (3 - 2 * glide.t);
-  const p = glide.from.clone().lerp(curLift.loadPoint, e);
+  const p = glide.from.clone().lerp(linePoint(curLift, WAIT_U), e);
   p.y = terrain.heightAt(p.x, p.z);
   let dy = glide.yaw1 - glide.yaw0; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
   rider.pos.copy(p); rider.yaw = glide.yaw0 + dy * e;
@@ -213,8 +403,6 @@ function updateGlide(dt) {
   rider.brakeAmt = 0;
   if (glide.t >= 1) {
     glide = null; rider.brakeAmt = 0; rider.vel.set(0, 0, 0);
-    chairIdx = curLift.nextChairToLoad().index;
-    document.getElementById('lift-status').textContent = 'Wait for the chair…';
   }
 }
 
@@ -241,9 +429,15 @@ let inLane = null;
 // where the lift line starts (between the ropes, at the back of the line)
 function laneEntrance(l) { return l.bottom.clone().addScaledVector(l.f, l.lane.d0 - 3).addScaledVector(l.p, (l.lane.l0 + l.lane.l1) / 2); }
 function updateLiftGuide() {
+  if (rider.state === 'fly') {
+    const above = Math.max(0, rider.pos.y - terrain.heightAt(rider.pos.x, rider.pos.z));
+    liftGuideEl.innerHTML = `🦅 Wingsuit · ${Math.round(above)} m above the snow<br><small>↓ dive · ↑ flare · ← → turn · touch down anywhere to ride</small>`;
+    liftGuideEl.classList.remove('hidden');
+    return;
+  }
   if (rider.pos.z > BASE_Z + 160) { liftGuideEl.classList.add('hidden'); return; }
   if (inLane) {
-    liftGuideEl.innerHTML = `🚡 ${inLane.name}<br><small>Ride up to the blue line and wait for the chair</small>`;
+    liftGuideEl.innerHTML = `🚡 ${inLane.name}<br><small>Ride to the end of the ropes, then follow the chair in front</small>`;
     liftGuideEl.classList.remove('hidden');
     return;
   }
@@ -261,6 +455,7 @@ function updateLiftGuide() {
 let camBlend = null;   // eases the camera from the lift line over to the chair view
 function boardChair() {
   game.mode = 'lift';
+  ach.addToSet('lifts', curLift.name);
   rider.beginSit();
   camBlend = { t: 0, pos: camera.position.clone(), quat: camera.quaternion.clone() };
   // look up the mountain along the cable, with the chairs ahead in view
@@ -269,18 +464,23 @@ function boardChair() {
 }
 
 function skipLift() {
-  if (game.mode === 'liftwait') boardChair();
+  if (game.mode === 'liftwait') { if (chairIdx < 0) chairIdx = curLift.nextChairToLoad().index; glide = null; boardChair(); }
   if (replayer.active) stopReplay();
   curLift.setChairU(chairIdx, curLift.unloadU);
 }
 
+// At the top: stand up and slide off the chair the way it was going, then turn wherever you like.
+let runCamBlend = null;
 function unload() {
   const p = curLift.unloadPoint.clone();
-  // ride off down the nearest run
-  const ra = terrain.runAt(p.x, p.z);
-  const t = ra ? ra.run.at(Math.min(ra.run.length, ra.s + 40)) : { x: p.x, z: p.z - 10 };
-  const yaw = Math.atan2(t.x - p.x, -(t.z - p.z));
-  startRun(p, yaw);
+  const fromPos = rider.root.position.clone(), fromQ = rider.root.quaternion.clone();
+  const camPos = camera.position.clone(), camQ = camera.quaternion.clone();
+  const f = curLift.f;
+  startRun(p, Math.atan2(f.x, -f.z));
+  rider.vel.set(f.x, 0, f.z).multiplyScalar(2.5);
+  rider.beginStand(fromPos, fromQ);
+  rider.updateVisual(0, {});
+  runCamBlend = { t: 0, pos: camPos, quat: camQ };
 }
 
 function renderHighlights() {
@@ -380,6 +580,7 @@ function updateLiftCamera() {
 
 function showMenu() {
   game.mode = 'menu';
+  heli.hide(); heliUi.classList.add('hidden');
   camBlend = null;
   glide = null;
   replayer.stop();
@@ -405,14 +606,27 @@ const padHelpEl = document.getElementById('pad-help');
 
 document.getElementById('btn-regular').onclick = () => setStance(true);
 document.getElementById('btn-goofy').onclick = () => setStance(false);
-document.getElementById('btn-start').onclick = () => startRun();
+document.getElementById('btn-start').onclick = () => startHeli();
+document.getElementById('btn-summit').onclick = () => startRun();
+document.getElementById('btn-ach').onclick = () => toggleAch(true);
+document.getElementById('btn-ach-lift').onclick = () => toggleAch(true);
+document.getElementById('ach-close').onclick = () => toggleAch(false);
 
 function handleEvents() {
   for (const ev of rider.events) {
-    if (ev.type === 'takeoff') { if (!ev.fromGrind || !tricks.active) { tricks.begin(); recorder.onTakeoff(); } }
+    if (ev.type === 'takeoff') { if (!ev.fromGrind || !tricks.active) { tricks.begin(); recorder.onTakeoff(); } onTakeoffAch(); }
+    else if (ev.type === 'fly-land') {
+      hud.popup('Wingsuit landing!', 0);
+      ach.unlock('wingsuit');
+      if (ev.dist >= 800) ach.unlock('flight');
+      emitPowder(30, rider.pos, rider.vel, 2.5);
+    }
+    else if (ev.type === 'fly-end') { /* flight over (landed or crashed) */ }
     else if (ev.type === 'grind-start') { if (!tricks.active) { tricks.begin(); recorder.onTakeoff(); } }
     else if (ev.type === 'land') {
+      const parts = tricks.active ? tricks.parts() : [];
       const res = tricks.finish(true, rider.airTime);
+      onLandAch(res, parts, rider.airTime);
       if (res && res.points > 0) {
         game.score += res.points;
         game.tricksLanded++;
@@ -421,8 +635,11 @@ function handleEvents() {
         hud.popup(res.mult > 1 ? `${res.name} <small>x${res.mult}</small>` : res.name, res.points);
       }
       if (ev.impact > 6) { chase.shake = Math.min(1, ev.impact / 14); emit(Math.min(60, Math.round(ev.impact * 4)), rider.pos, rider.vel, 4); }
+      if (terrain.groomAt(rider.pos.x, rider.pos.z) < 0.3) emitPowder(Math.min(40, 10 + Math.round(ev.impact * 2)), rider.pos, rider.vel, 2.5);
     } else if (ev.type === 'crash') {
       const res = tricks.finish(false, rider.airTime);
+      if (/tree/i.test(ev.reason)) ach.addCount('trees', 1);
+      airCtx = null;
       game.crashes++;
       hud.popup(`${ev.reason}${res ? `<span class="pts">lost: ${res.name}</span>` : ''}`, 0, true);
       chase.shake = 0.8;
@@ -466,17 +683,27 @@ function tick(dt, now) {
   padHelpEl.classList.toggle('hidden', !(IS_XBOX && !input.padName));
   if (inp.helpPressed) hud.toggleHelp();
 
+  ach.update(dt);
+  heli.update(dt);
+  if (achOpen) {
+    // achievements panel is up: Esc / B / T / Y closes it, nothing else reacts
+    if (inp.menuPressed || inp.taps.has('KeyT') || inp.padTaps.has(BTN.B) || inp.padTaps.has(BTN.Y)) toggleAch(false);
+    inp.confirmPressed = inp.restartPressed = inp.menuPressed = inp.leftPressed = inp.rightPressed = inp.upPressed = inp.downPressed = false;
+    inp.taps.clear(); inp.padTaps.clear();
+  } else if ((game.mode === 'menu' || game.mode === 'lift' || game.mode === 'liftwait') && !replayer.active && (inp.taps.has('KeyT') || inp.padTaps.has(BTN.Y))) toggleAch(true);
   if (game.mode === 'menu') {
     if (inp.leftPressed && game.sport === 'board') setStance(true);
     if (inp.rightPressed && game.sport === 'board') setStance(false);
     if (inp.upPressed) setSport('board');
     if (inp.downPressed) setSport('ski');
-    if (inp.confirmPressed) startRun();
+    if (inp.confirmPressed) startHeli();
     // slow orbit preview of the rider at the top
     const t = now / 4000;
     camera.position.set(rider.pos.x + Math.sin(t) * 7, rider.pos.y + 2.5, rider.pos.z + Math.cos(t) * 7);
     camera.lookAt(rider.pos.x, rider.pos.y + 0.9, rider.pos.z);
     rider.updateVisual(dt, inp);
+  } else if (game.mode === 'heli') {
+    updateHeliMode(dt, inp);
   } else if (game.mode === 'run') {
     if (inp.restartPressed) startRun();
     else if (inp.menuPressed) showMenu();
@@ -492,7 +719,20 @@ function tick(dt, now) {
     rider.updateVisual(dt, inp);
     if (!game.paused) recorder.record(dt, rider);
     chase.update(dt, rider);
+    if (runCamBlend) {
+      // ease the camera from the chair view to behind you
+      runCamBlend.t = Math.min(1, runCamBlend.t + dt / 1.3);
+      const e = runCamBlend.t * runCamBlend.t * (3 - 2 * runCamBlend.t);
+      camera.position.lerpVectors(runCamBlend.pos, camera.position.clone(), e);
+      camera.quaternion.slerpQuaternions(runCamBlend.quat, camera.quaternion.clone(), e);
+      if (runCamBlend.t >= 1) runCamBlend = null;
+    }
 
+    // powder: a cloud kicks up behind you off the groomed runs (bigger when you turn or brake)
+    if (rider.state === 'ride' && rider.speed > 3 && terrain.groomAt(rider.pos.x, rider.pos.z) < 0.3) {
+      powderAcc += dt * (6 + rider.speed * 0.9 + rider.spray * 25);
+      while (powderAcc >= 1) { powderAcc -= 1; emitPowder(1, rider.pos, rider.vel); }
+    }
     // spray
     if (rider.state !== 'air' && rider.spray > 0.15) {
       const n = Math.round(rider.spray * 4);
@@ -524,6 +764,7 @@ function tick(dt, now) {
       }
     }
     if (game.mode === 'run') updateLiftGuide();
+    if (game.mode === 'run') trackAch(dt);
     // stopped on a flat: remind how to push along
     const slow = game.mode === 'run' && rider.state === 'ride' && rider.speed < 1.2 && !inLane && rider.pushAmt < 0.2;
     pushHint.t = slow ? pushHint.t + dt : 0;
@@ -535,9 +776,12 @@ function tick(dt, now) {
   else if (game.mode === 'liftwait' || game.mode === 'lift') {
     liftInput(inp, dt);
     if (game.mode === 'liftwait') {
-      const u = curLift.chairU(chairIdx);
       if (glide) updateGlide(dt);
-      else if (u >= curLift.loadU - 0.9 && u < curLift.loadU + 10) boardChair();   // chair comes up behind you: sit back onto it
+      else {
+        updateLoading(dt);
+        const u = chairIdx >= 0 ? curLift.chairU(chairIdx) : -1;
+        if (loading.phase === 'ready' && u >= curLift.loadU - 0.9 && u < curLift.loadU + 10) boardChair();   // chair comes up behind you: sit back onto it
+      }
       rider.updateVisual(dt, inp);
       chase.update(dt, rider);
     }
@@ -572,6 +816,7 @@ function tick(dt, now) {
     blob.scale.setScalar(1 + above * 0.15); blob.material.opacity = Math.max(0, 1 - above / 6);
   }
   updateParticles(dt);
+  updatePowder(dt);
   // shadow box follows the rider (or the replay)
   const focus = replayer.active ? replayer.pos : rider.pos;
   sun.position.copy(focus).add(SUN_OFFSET);

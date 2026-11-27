@@ -44,9 +44,13 @@
     <button id="btn-goofy" class="opt">Goofy</button>
   </div>
   <p id="pad-help" class="warn hidden">Controller not reaching the game? Hold the Menu button (three lines) until a menu appears, then choose “Use game controls”. Then press A.</p>
-  <button id="btn-start" class="big">Drop in</button>
-  <button id="btn-fullscreen" class="opt small">Full screen</button>
-  <p class="hint">Keyboard: ↑/↓ snowboarder or skier · ←/→ stance · Enter to start<br>Xbox: D-pad up/down rider · left/right stance · A to start</p>
+  <button id="btn-start" class="big">🚁 Helicopter drop</button>
+  <div class="menu-row">
+    <button id="btn-summit" class="opt small">Start at the summit</button>
+    <button id="btn-ach" class="opt small">🏆 Achievements</button>
+    <button id="btn-fullscreen" class="opt small">Full screen</button>
+  </div>
+  <p class="hint">Keyboard: ↑/↓ snowboarder or skier · ←/→ stance · Enter to start · T achievements<br>Xbox: D-pad up/down rider · left/right stance · A to start · Y achievements</p>
   <div id="menu-controls"></div>
 </div>
 
@@ -56,6 +60,7 @@
     <div id="lift-status"></div>
     <button id="btn-map" class="opt small toggle">🗺 Map <kbd>M</kbd></button>
     <button id="btn-hl" class="opt small toggle">🎬 Highlights <kbd>H</kbd></button>
+    <button id="btn-ach-lift" class="opt small">🏆 <kbd>T</kbd></button>
     <button id="btn-skip" class="opt small">Skip ride ⏭</button>
   </div>
   <div id="map-panel" class="panel"><div class="panel-title">Trail map</div><div id="map-wrap"></div></div>
@@ -65,8 +70,17 @@
     <div id="hl-list"></div>
     <p class="muted">1 / 2 / 3 or click to replay · Xbox: D-pad + A</p>
   </div>
-  <div id="lift-hint">Look around: arrow keys, drag the mouse, or right stick · M / LB map · H / RB highlights · Enter / Menu skip to the top</div>
+  <div id="lift-hint">Look around: arrow keys, drag the mouse, or right stick · M / LB map · H / RB highlights · T / Y achievements · Enter / Menu skip to the top</div>
 </div>
+
+<div id="heli-ui" class="hidden">
+  <div class="heli-title">🚁 Wingsuit drop</div>
+  <div>Pick your spot. <b>Space</b> / <b>A</b> to jump.</div>
+  <div class="muted">In the air: ↓ dive · ↑ flare · ← → turn · touch down anywhere and you're riding</div>
+</div>
+
+<div id="ach-toast"></div>
+<div id="ach-panel" class="hidden"><div id="ach-body"></div><button id="ach-close" class="opt small">Close (Esc / B)</button></div>
 
 <div id="replay-ui" class="hidden">
   <div id="replay-title"></div>
@@ -78,6 +92,6 @@
   <div class="muted">Drag or right stick to orbit</div>
 </div>
 
-<script type="module" src="src-v9/main.js"></script>
+<script type="module" src="src-v10/main.js"></script>
 </body>
 </html>

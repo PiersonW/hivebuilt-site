@@ -69,6 +69,8 @@ const SNOW_ROCKS = [
   [-150, -1060, 3, 1.6], [-145, -1215, 2.8, 1.5],
   [-245, -960, 3, 1.7], [-250, -1130, 3, 1.6],
 ];
+// A hidden yeti (way out on the right-hand valley wall; easiest to reach from the air)
+export const YETI = { x: 334, z: -300 };
 // a line segment's frame: along (ex, ez), downhill-side normal (nx, nz), length
 function segFrame([a, b]) {
   let ex = b[0] - a[0], ez = b[1] - a[1]; const len = Math.hypot(ex, ez); ex /= len; ez /= len;
@@ -131,6 +133,7 @@ export class Terrain {
     this._buildPark();
     this._buildFeatures();
     this._buildLogs();
+    this._buildYeti();
     this._buildTrees();
     this._bakeShadows();
     this._buildRocks();
@@ -400,6 +403,56 @@ export class Terrain {
     return h;
   }
 
+  // Where am I among the off-piste landforms? Used for achievements and gap detection.
+  // -> { gully: {i, d, side, hw} | null, cliff: {i, u, v, len} | null, ridge: {i, u, v, len} | null }
+  landformAt(x, z) {
+    const out = { gully: null, cliff: null, ridge: null };
+    GULLY_F.forEach((g, i) => {
+      if (out.gully || x < g.x0 - 10 || x > g.x1 + 10 || z < g.z0 - 10 || z > g.z1 + 10) return;
+      let best = 1e9, side = 0;
+      for (const f of g.segs) {
+        const u = Math.max(0, Math.min(f.len, (x - f.ax) * f.ex + (z - f.az) * f.ez));
+        const dx = x - f.ax - f.ex * u, dz = z - f.az - f.ez * u, d = Math.hypot(dx, dz);
+        if (d < best) { best = d; side = Math.sign(f.ex * dz - f.ez * dx) || 1; }
+      }
+      if (best < g.hw + 10) out.gully = { i, d: best, side, hw: g.hw };
+    });
+    const frame = (list, key) => list.forEach((c, i) => {
+      if (out[key]) return;
+      const dx = x - c.ax, dz = z - c.az, u = dx * c.ex + dz * c.ez, v = dx * c.nx + dz * c.nz;
+      if (u > -4 && u < c.len + 4 && v > -25 && v < 60) out[key] = { i, u, v, len: c.len };
+    });
+    frame(CLIFF_F, 'cliff'); frame(RIDGE_F, 'ridge');
+    return out;
+  }
+
+  snowRockIndex(x, z) {
+    const list = this.snowRocks || [];
+    for (let i = 0; i < list.length; i++) { const b = list[i]; if ((x - b.x) ** 2 + (z - b.z) ** 2 < b.R2) return i; }
+    return -1;
+  }
+
+  _buildYeti() {
+    const fur = new THREE.MeshStandardMaterial({ color: 0xf4f6fa, flatShading: true, roughness: 1 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0x6d7d93, flatShading: true });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x15161a });
+    const g = new THREE.Group();
+    const ball = (r, x, y, z, m = fur, sx = 1, sy = 1, sz = 1) => { const b = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), m); b.position.set(x, y, z); b.scale.set(sx, sy, sz); b.castShadow = true; g.add(b); return b; };
+    ball(0.95, 0, 1.25, 0, fur, 1, 1.25, 0.9);                 // body
+    ball(0.6, 0, 2.55, 0.05);                                   // head
+    ball(0.38, 0, 2.5, 0.42, skin, 1, 0.9, 0.5);                // face
+    for (const sx of [-1, 1]) {
+      ball(0.3, sx * 1.05, 1.55, 0.1, fur, 0.8, 1.6, 0.8).rotation.z = sx * 0.5;          // arms (one waving)
+      ball(0.32, sx * 0.45, 0.25, 0.1, fur, 1, 0.8, 1.2);                                  // feet
+      const lens = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.14, 0.05), dark); lens.position.set(sx * 0.16, 2.6, 0.62); g.add(lens);
+    }
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.04), dark); bridge.position.set(0, 2.62, 0.62); g.add(bridge);
+    const y = this.terrainHeight(YETI.x, YETI.z);
+    g.position.set(YETI.x, y - 0.1, YETI.z); g.rotation.y = -2.4;   // looking out over the resort
+    this.scene.add(g);
+    this.addObstacle(YETI.x, YETI.z, 1.0, 3, 'yeti');
+  }
+
   snowRockNear(x, z) {
     for (const b of this.snowRocks || []) if ((x - b.x) ** 2 + (z - b.z) ** 2 < b.R2) return b;
     return null;
@@ -513,23 +566,35 @@ export class Terrain {
     const U = this.bakedUniforms;
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, U);
-      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec4 shadowArea;\nvarying vec2 vBakedUv;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvec4 bwp = modelMatrix * vec4(transformed, 1.0);\nvBakedUv = vec2((bwp.x - shadowArea.x) / shadowArea.z, (shadowArea.y - bwp.z) / shadowArea.w);');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D shadowTex;\nvarying vec2 vBakedUv;')
-        .replace('#include <color_fragment>', '#include <color_fragment>\nfloat baked = texture2D(shadowTex, vBakedUv).r;\ndiffuseColor.rgb *= mix(vec3(1.0), vec3(0.34, 0.42, 0.64), baked);');
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec4 shadowArea;\nvarying vec2 vBakedUv;\nattribute float groomed;\nvarying float vGroom;\nvarying vec3 vSnowW;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvec4 bwp = modelMatrix * vec4(transformed, 1.0);\nvBakedUv = vec2((bwp.x - shadowArea.x) / shadowArea.z, (shadowArea.y - bwp.z) / shadowArea.w);\nvGroom = groomed; vSnowW = bwp.xyz;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D shadowTex;\nvarying vec2 vBakedUv;\nvarying float vGroom;\nvarying vec3 vSnowW;')
+        .replace('#include <color_fragment>', `#include <color_fragment>
+float baked = texture2D(shadowTex, vBakedUv).r;
+diffuseColor.rgb *= mix(vec3(1.0), vec3(0.34, 0.42, 0.64), baked);
+// fresh powder off the groomed runs: tiny crystals that glint as you move past (only up close)
+vec2 cell = floor(vSnowW.xz * 16.0);
+float hsh = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+vec3 toCam = normalize(cameraPosition - vSnowW);
+float tw = fract(hsh * 17.0 + dot(toCam, vec3(3.1, 5.7, 2.3)) * 2.0);
+float glint = step(0.993, hsh) * step(0.55, tw) * (1.0 - vGroom) * smoothstep(45.0, 6.0, length(cameraPosition - vSnowW));
+diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
     };
     mat.customProgramCacheKey = () => 'snow-baked-shadows';
-    const snow = new THREE.Color(0.93, 0.955, 0.985), powder = new THREE.Color(0.86, 0.9, 0.97), groomed = new THREE.Color(0.975, 0.98, 0.99);
+    // untracked powder is bright and soft; the groomed runs are a touch flatter and greyer (packed corduroy)
+    const snow = new THREE.Color(0.97, 0.98, 1.0), powder = new THREE.Color(0.93, 0.955, 0.995), groomed = new THREE.Color(0.9, 0.915, 0.94);
     const rock = new THREE.Color(0.38, 0.36, 0.35), rockLight = new THREE.Color(0.55, 0.52, 0.49), c = new THREE.Color();
     const CH = 64;
     this.chunks = [];
     for (let cj = 0; cj < rows; cj += CH) for (let ci = 0; ci < cols; ci += CH) {
       const i1 = Math.min(cols, ci + CH), j1 = Math.min(rows, cj + CH), w = i1 - ci + 1, h = j1 - cj + 1;
-      const pos = new Float32Array(w * h * 3), nor = new Float32Array(w * h * 3), col = new Float32Array(w * h * 3), uv = new Float32Array(w * h * 2);
+      const pos = new Float32Array(w * h * 3), nor = new Float32Array(w * h * 3), col = new Float32Array(w * h * 3), uv = new Float32Array(w * h * 2), grm = new Float32Array(w * h);
       for (let j = cj; j <= j1; j++) for (let i = ci; i <= i1; i++) {
         const q = j * W + i, v = (j - cj) * w + (i - ci);
         const x = this.x0 + i * CELL, z = this.z0 - j * CELL;
-        pos[v * 3] = x; pos[v * 3 + 1] = H[q]; pos[v * 3 + 2] = z;
+        // deep powder sits in soft pillows a little above the base you ride on, so you sink into it
+        pos[v * 3] = x; pos[v * 3 + 1] = H[q] + this.powderDepth(x, z, this.groom[q]); pos[v * 3 + 2] = z;
+        grm[v] = this.groom[q];
         const hL = H[j * W + Math.max(0, i - 1)], hR = H[j * W + Math.min(cols, i + 1)];
         const hU = H[Math.max(0, j - 1) * W + i], hD = H[Math.min(rows, j + 1) * W + i];
         const dx = (hR - hL) / (2 * CELL), dz = (hU - hD) / (2 * CELL);
@@ -553,6 +618,7 @@ export class Terrain {
       geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
       geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
       geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      geo.setAttribute('groomed', new THREE.BufferAttribute(grm, 1));
       geo.setIndex(idx);
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, mat);
@@ -561,6 +627,16 @@ export class Terrain {
       this.chunks.push(mesh);
     }
   }
+
+  // How deep the soft powder looks off the groomed runs (visual only: you ride on the packed base below it).
+  powderDepth(x, z, g = this.groomAt(x, z)) {
+    // (the base area is packed down by everyone walking around the lifts and lodge)
+    const wild = (1 - smoothstep(0.05, 0.5, g)) * smoothstep(BASE_Z - 10, BASE_Z + 60, z);
+    if (wild <= 0) return 0;
+    return wild * Math.max(0, 0.1 + 0.12 * fbm(x / 6, z / 6, 2) + 0.04 * noise2(x / 2.1, z / 2.1));
+  }
+
+  groomAt(x, z) { return this.groom[this._q(x, z)]; }
 
   _buildKickers() {
     const mat = new THREE.MeshStandardMaterial({ color: 0xeef4fb, roughness: 0.8, side: THREE.DoubleSide, normalMap: this.material.normalMap, normalScale: new THREE.Vector2(0.4, 0.4) });
@@ -679,7 +755,7 @@ export class Terrain {
     }
     const nA = across.length;
     for (let i = 0; i < along.length - 1; i++) for (let j = 0; j < nA - 1; j++) {
-      const q = i * nA + j; idx.push(q, q + nA, q + 1, q + 1, q + nA, q + nA + 1);
+      const q = i * nA + j; idx.push(q, q + 1, q + nA, q + 1, q + nA + 1, q + nA);   // counter-clockwise from above
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -918,6 +994,7 @@ export class Terrain {
       if (PADS.some(p => Math.hypot(tx - p.x, tz - p.z) < p.r + 8)) continue;
       if (this.kickers.some(k => Math.hypot(tx - k.x, tz - k.z) < k.len + 8)) continue;
       if (this.inFeature(tx, tz, 2)) continue;
+      if (Math.hypot(tx - YETI.x, tz - YETI.z) < 9) continue;
       if (this.rails.some(rl => distToSeg(tx, tz, rl.p0, rl.p1) < 6)) continue;
       if (lifts.some(([a, b]) => distToSeg(tx, tz, a, b) < 8)) continue;
       const size = 0.75 + r() * 0.55 + 0.25 * smoothstep(300, 1200, s);

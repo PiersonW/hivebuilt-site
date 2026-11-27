@@ -13,8 +13,8 @@ export const TUNE = {
   tuckGrip: 5.0,
   brakeGrip: 2.2,
   carveScrub: 0.12,       // share of speed lost per radian the carve turns you
-  snowFriction: 0.045,
-  drag: 0.0078,           // normal stance air drag (v^2): straight down the steep middle tops out near 50 mph
+  snowFriction: 0.038,
+  drag: 0.0070,           // normal stance air drag (v^2): straight down the steep middle tops out near 50 mph
   tuckDrag: 0.0013,       // low: a straight tuck keeps building toward 60-65 mph
   standDrag: 0.02,
   brakeDecel: 11,
@@ -230,6 +230,8 @@ export class Rider {
     if (phantom) { hipH = 0.85; lean = 0.25; feetLift = 0.35; }
     if (crashing) { hipH = 0.95; lean = -0.2; }
     const seated = this.state === 'lift';
+    const standing = this.state === 'ride' && this.standT < 1;
+    if (standing) { const e = 1 - this.standT * this.standT * (3 - 2 * this.standT); hipH = 0.92 - 0.42 * e; lean = 0.25 - 0.37 * e + 0.25 * Math.sin(Math.PI * this.standT); }
     if (seated) { const e = this.sitE === undefined ? 1 : this.sitE; hipH = 0.92 - 0.42 * e; lean = 0.25 - 0.37 * e; }
     const gettingUp = this.state === 'crash' && this.getupT >= 0;
     const gu = gettingUp ? this.getupT : 0;
@@ -277,17 +279,28 @@ export class Rider {
     const lean2 = P.lean;
     const hipC = new THREE.Vector3(0, P.hipH + (phantom ? P.feetLift : 0) + P.boardLift * 0.6, -0.06 - 0.1 * lean2);
     this.hipC = hipC;
+    // snowboard push: hips, upper body and the free (pushing) leg turn to face where you're going;
+    // the front foot stays strapped in sideways on the board
+    const tw = !ski && this.state === 'ride' ? this.pushAmt : 0;
+    const twR = this._twistQ || (this._twistQ = new THREE.Quaternion());
+    twR.setFromAxisAngle(UP, sig * (this.switch ? -1 : 1) * 1.2 * tw);
+    const pushLeg = (sig * (this.switch ? -1 : 1)) > 0 ? 1 : 0;      // body -x side is the tail side for regular
     const fwd = new THREE.Vector3(0, 0, 1);
     for (let i = 0; i < 2; i++) {
       const side = i === 0 ? 1 : -1;
-      const hip = hipC.clone().add(new THREE.Vector3(side * 0.12, 0, 0));
+      const hipOff = new THREE.Vector3(side * 0.12, 0, 0);
+      if (tw > 0.02) hipOff.applyQuaternion(twR);
+      const hip = hipC.clone().add(hipOff);
       const foot = bind[i];
-      const knee = ik(hip, foot, 0.46, 0.46, fwd.clone().add(new THREE.Vector3(side * (ski ? 0.05 : 0.3), 0, 0)));
+      const pole = fwd.clone().add(new THREE.Vector3(side * (ski ? 0.05 : 0.3), 0, 0));
+      const free = tw > 0.02 && i === pushLeg;
+      if (free) pole.set(0, 0, 1).applyQuaternion(twR);              // knee points forward, not out the side
+      const knee = ik(hip, foot, 0.46, 0.46, pole);
       placeLimb(this.thighs[i], hip, knee, 0.15);
       placeLimb(this.shins[i], knee, foot, 0.13);
       this.boots[i].position.copy(foot).add(new THREE.Vector3(0, 0.03, 0.03));
       this.boots[i].scale.set(0.14, 0.1, 0.26);
-      this.boots[i].quaternion.identity();
+      if (free) this.boots[i].quaternion.copy(twR); else this.boots[i].quaternion.identity();
     }
     // torso
     const neck = hipC.clone().add(new THREE.Vector3(0, Math.cos(lean2) * 0.58, Math.sin(lean2) * 0.58));
@@ -365,12 +378,9 @@ export class Rider {
         placeLimb(this.poles[i], this.handPos[i], tipP, 0.03);
       }
     }
-    // snowboard push: the board stays pointing ahead, but the upper body turns to face where you're going
-    const tw = !ski && this.state === 'ride' ? this.pushAmt : 0;
+    // snowboard push: the upper body turns with the hips (see the legs above)
     if (tw > 0.02) {
-      const ang = sig * (this.switch ? -1 : 1) * 1.2 * tw;
-      const R = this._twistQ || (this._twistQ = new THREE.Quaternion());
-      R.setFromAxisAngle(UP, ang);
+      const R = twR;
       for (const m of [this.torso, this.head, this.helmet, this.goggles, ...this.upperArms, ...this.foreArms, ...this.hands]) {
         m.position.sub(hipC).applyQuaternion(R).add(hipC);
         m.quaternion.premultiply(R);
@@ -386,7 +396,7 @@ export class Rider {
     this.state = 'ride'; this.switch = false;
     this.flip = 0; this.flipVel = 0; this.spinVel = 0; this.grab = null; this.phantomT = -1;
     this.crouch = 0; this.charge = 0; this.lean = 0; this.brakeAmt = 0;
-    this.getupT = -1; this.rail = null; this.boardslide = 0; this.pipeAir = false;
+    this.getupT = -1; this.rail = null; this.boardslide = 0; this.pipeAir = false; this.standT = 1;
     this.terrain.normalAt(pos.x, pos.z, this.normal);
     this.alignQ.setFromUnitVectors(UP, this.normal);
   }
@@ -400,6 +410,13 @@ export class Rider {
     this.sitFromQ = this.root.quaternion.clone();
   }
 
+  // Stand up off the chair at the top: blends from the seat to riding over ~0.9 s (call after reset()).
+  beginStand(fromPos, fromQ) {
+    this.standT = 0;
+    this.standFromPos = fromPos.clone();
+    this.standFromQ = fromQ.clone();
+  }
+
   // Sit on a chairlift seat (call every frame while riding the lift).
   sitAt(seat, dir) {
     this.state = 'lift';
@@ -409,7 +426,8 @@ export class Rider {
   }
 
   step(dt, input) {
-    if (this.state === 'lift') return;
+    if (this.state === 'lift' || this.state === 'heli') return;
+    if (this.state === 'fly') { this._fly(dt, input); return; }
     if (this.state === 'ride') this._ground(dt, input);
     else if (this.state === 'air') this._air(dt, input);
     else if (this.state === 'grind') this._grind(dt, input);
@@ -424,7 +442,7 @@ export class Rider {
     // tree hits
     if (this.state === 'ride' || this.state === 'air') {
       const t = this.terrain.treeNear(this.pos.x, this.pos.z);
-      if (t && this.pos.y < t.y + t.h) this.doCrash({ tower: 'Hit a lift tower!', lodge: 'Hit the lodge!' }[t.kind] || 'Hit a tree!');
+      if (t && this.pos.y < t.y + t.h) this.doCrash({ tower: 'Hit a lift tower!', lodge: 'Hit the lodge!', yeti: 'Ran into the yeti!' }[t.kind] || 'Hit a tree!');
     }
   }
 
@@ -506,7 +524,8 @@ export class Rider {
 
     // friction + drag
     const sp = this.vel.length();
-    const drag = tuck ? T.tuckDrag : stand ? T.standDrag : T.drag;
+    // holding jump crouches you low too: the longer you charge, the more speed you carry into the pop
+    const drag = tuck || input.jump ? T.tuckDrag : stand ? T.standDrag : T.drag;
     let dec = T.snowFriction * G * n.y + drag * sp * sp + (brake ? T.brakeDecel : 0) + (stand ? 1.2 : 0);
     if (sp > T.maxSpeed) dec += (sp - T.maxSpeed) * 1.5;   // soft speed limit
     if (sp > 1e-3) this.vel.multiplyScalar(Math.max(0, sp - dec * dt) / sp);
@@ -556,6 +575,8 @@ export class Rider {
     const pa = this.terrain.pipeAt ? this.terrain.pipeAt(this.pos.x, this.pos.z) : null;
     this.pipeAir = !!(pa && pa.onWall);
     if (this.pipeAir) {
+      this.pipeN = (this.pipeN || new THREE.Vector3()).copy(this.normal);
+      this.pipeIn = { x: -pa.cx * Math.sign(pa.l), z: -pa.cz * Math.sign(pa.l), ax: pa.ax, az: pa.az };
       const sg = Math.sign(pa.l), ox = pa.cx * sg, oz = pa.cz * sg;     // out over the deck
       const vc = this.vel.x * ox + this.vel.z * oz;
       this.vel.x -= ox * (vc + 0.45); this.vel.z -= oz * (vc + 0.45);
@@ -593,8 +614,14 @@ export class Rider {
     // spin (left/right) and flip (up = front flip, down = back flip)
     if (input.steer) this.spinVel = damp(this.spinVel, input.steer * T.spinRate, 9, dt);
     else {
-      // let go: settle onto the nearest 180 lined up with travel (forgiving landings)
-      const vh = headingOf(this.vel);
+      // let go: settle onto the nearest 180 lined up with travel (forgiving landings).
+      // In the pipe, line up with the way you'll ride back down the wall: in and along the pipe.
+      let vh = headingOf(this.vel);
+      if (this.pipeAir && this.pipeIn) {
+        const along = this.vel.x * this.pipeIn.ax + this.vel.z * this.pipeIn.az;
+        const ins = Math.max(3, Math.abs(along) * 0.9);
+        vh = Math.atan2(this.pipeIn.ax * along + this.pipeIn.x * ins, -(this.pipeIn.az * along + this.pipeIn.z * ins));
+      }
       const off = wrap(this.airYaw - vh);
       const target = Math.abs(off) < Math.PI / 2 ? 0 : Math.sign(off) * Math.PI;
       const err = off - target;
@@ -739,6 +766,123 @@ export class Rider {
     }
   }
 
+  // ---------------- wingsuit ----------------
+  // Leave the helicopter: glide with ↓ to dive (faster, steeper), ↑ to flare (slower, flatter, a short
+  // swoop up if you're fast), ← → to bank and turn. Touch down anywhere and you're riding.
+  startFlying(pos, yaw, speed) {
+    this.state = 'fly';
+    this.pos.copy(pos); this.yaw = yaw; this.flyYaw = yaw;
+    this.flySpeed = speed; this.flyGamma = 0.5; this.flyBank = 0; this.flyDist = 0;
+    this.vel.set(Math.sin(yaw) * speed, -speed * 0.3, -Math.cos(yaw) * speed);
+    this.grab = null; this.phantomT = -1; this.crouch = 0; this.lean = 0; this.brakeAmt = 0; this.switch = false;
+    this.gear.visible = false;
+    this._wings(true);
+  }
+
+  _fly(dt, input) {
+    const T = TUNE;
+    const pitch = (input.down ? 1 : 0) - (input.up ? 1 : 0);         // + = dive
+    // glide angle (down from level): normal glide ~22 deg, dive 50 deg, flare can climb briefly when fast
+    const fast = smoothstep(18, 32, this.flySpeed);
+    let gWant = pitch > 0 ? 0.95 : pitch < 0 ? -0.28 * fast + 0.12 * (1 - fast) : 0.5;
+    if (this.flySpeed < 13) gWant = Math.max(gWant, 0.55 + (13 - this.flySpeed) * 0.05);   // stalling: nose drops
+    this.flyGamma = damp(this.flyGamma, gWant, 1.6, dt);
+    this.flyBank = damp(this.flyBank, input.steer || 0, 3, dt);
+    this.flyYaw += this.flyBank * 1.05 * dt;
+    // speed: gravity along the glide path against drag
+    this.flySpeed += (G * Math.sin(this.flyGamma) - 0.0042 * this.flySpeed * this.flySpeed) * dt;
+    this.flySpeed = Math.max(8, Math.min(48, this.flySpeed));
+    const cg = Math.cos(this.flyGamma), sg = Math.sin(this.flyGamma);
+    this.vel.set(Math.sin(this.flyYaw) * cg * this.flySpeed, -sg * this.flySpeed, -Math.cos(this.flyYaw) * cg * this.flySpeed);
+    this.pos.addScaledVector(this.vel, dt);
+    this.flyDist += Math.hypot(this.vel.x, this.vel.z) * dt;
+    this.yaw = this.flyYaw; this.airYaw = this.flyYaw;
+    // stay over the mountain
+    const W = this.terrain;
+    if (Math.abs(this.pos.x) > -W.x0 - 40 || this.pos.z > W.z0 - 30) {
+      // near the edge of the world: ease back toward the middle of the mountain
+      const want = Math.atan2(-this.pos.x, -60);
+      this.flyYaw += wrap(want - this.flyYaw) * 1.2 * dt;
+    }
+    // trees and towers
+    const t = W.treeNear(this.pos.x, this.pos.z);
+    const gh = W.heightAt(this.pos.x, this.pos.z);
+    if (t && this.pos.y < t.y + t.h) { this._endFlight(); this.doCrash(t.kind === 'tree' ? 'Flew into a tree!' : 'Flew into something!'); return; }
+    if (this.pos.y <= gh + 0.05) {
+      this.pos.y = gh;
+      this._endFlight();
+      if (this.flyGamma > 0.78 && this.flySpeed > 30) { this.doCrash('Came in too steep!'); return; }
+      // touch down: carry the speed along the snow (capped so it's rideable)
+      const n = W.normalAt(this.pos.x, this.pos.z, this.normal);
+      this.vel.addScaledVector(n, -this.vel.dot(n));
+      const sp = this.vel.length(), keep = Math.min(sp, 20);
+      if (sp > 0.01) this.vel.multiplyScalar(keep / sp);
+      this.state = 'ride'; this.crouch = 0.9;
+      this.alignQ.setFromUnitVectors(UP, n);
+      this.events.push({ type: 'fly-land', dist: this.flyDist });
+    }
+  }
+
+  _endFlight() {
+    this.gear.visible = true;
+    this._wings(false);
+    this._orientBody();
+    this.events.push({ type: 'fly-end', dist: this.flyDist });
+  }
+
+  // wingsuit fabric between arms and body, and between the legs
+  _wings(on) {
+    if (!this.wingMesh) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(9 * 3 * 2 + 6 * 3), 3));
+      this.wingMesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: this.mats.jacket.color, side: THREE.DoubleSide, flatShading: true, roughness: 0.7 }));
+      this.wingMesh.castShadow = true; this.wingMesh.frustumCulled = false;
+      this.body.add(this.wingMesh);
+    }
+    this.wingMesh.visible = on;
+    this.wingMesh.material.color = this.mats.jacket.color;
+  }
+
+  _flyPose() {
+    // standing-style pose in the body frame (the root lays the whole body flat, head first)
+    this.body.rotation.y = Math.PI; this.body.updateMatrix();
+    const hipC = new THREE.Vector3(0, 0.95, 0);
+    this.hipC = hipC;
+    const neck = hipC.clone().add(new THREE.Vector3(0, 0.58, 0.02));
+    const feet = [new THREE.Vector3(0.32, 0.06, -0.06), new THREE.Vector3(-0.32, 0.06, -0.06)];
+    for (let i = 0; i < 2; i++) {
+      const side = i === 0 ? 1 : -1;
+      const hip = hipC.clone().add(new THREE.Vector3(side * 0.12, 0, 0));
+      const knee = hip.clone().lerp(feet[i], 0.5).add(new THREE.Vector3(0, 0, -0.03));
+      placeLimb(this.thighs[i], hip, knee, 0.15); placeLimb(this.shins[i], knee, feet[i], 0.13);
+      this.boots[i].position.copy(feet[i]); this.boots[i].scale.set(0.14, 0.1, 0.26); this.boots[i].quaternion.identity();
+    }
+    placeLimb(this.torso, hipC, neck, 0.34); this.torso.scale.z = 0.22;
+    this.head.position.copy(neck).add(new THREE.Vector3(0, 0.16, 0.04));
+    this.helmet.position.copy(this.head.position).add(new THREE.Vector3(0, 0.02, 0)); this.helmet.quaternion.identity();
+    this.goggles.position.copy(this.head.position).add(new THREE.Vector3(0, 0.02, 0.13)); this.goggles.quaternion.identity();
+    const sh = [neck.clone().add(new THREE.Vector3(0.21, -0.06, 0)), neck.clone().add(new THREE.Vector3(-0.21, -0.06, 0))];
+    const flap = Math.sin(performance.now() / 260) * 0.04;
+    const hands = [sh[0].clone().add(new THREE.Vector3(0.66, -0.18 + flap, -0.05)), sh[1].clone().add(new THREE.Vector3(-0.66, -0.18 - flap, -0.05))];
+    for (let i = 0; i < 2; i++) {
+      const elbow = sh[i].clone().lerp(hands[i], 0.5).add(new THREE.Vector3(0, 0.02, -0.04));
+      placeLimb(this.upperArms[i], sh[i], elbow, 0.11); placeLimb(this.foreArms[i], elbow, hands[i], 0.1);
+      this.hands[i].position.copy(hands[i]); this.hands[i].scale.set(0.1, 0.1, 0.1);
+      this.handPos[i].copy(hands[i]);
+      if (this.poles[i].visible) placeLimb(this.poles[i], hands[i], hands[i].clone().add(new THREE.Vector3(0, -0.9, -0.1)), 0.03);
+    }
+    // fabric: shoulder-hand-hip triangles (x2, as fans) and the panel between the legs
+    const a = this.wingMesh.geometry.attributes.position, P = [];
+    for (let i = 0; i < 2; i++) {
+      const side = i === 0 ? 1 : -1, hipS = hipC.clone().add(new THREE.Vector3(side * 0.16, -0.15, 0));
+      const mid = hands[i].clone().lerp(hipS, 0.5).add(new THREE.Vector3(0, 0, -0.04));
+      P.push(sh[i], hands[i], mid, sh[i], mid, hipS, sh[i], hipS, hipC.clone().add(new THREE.Vector3(side * 0.05, 0.2, 0)));
+    }
+    P.push(hipC.clone().add(new THREE.Vector3(0.14, -0.1, 0)), feet[0], feet[1], hipC.clone().add(new THREE.Vector3(0.14, -0.1, 0)), feet[1], hipC.clone().add(new THREE.Vector3(-0.14, -0.1, 0)));
+    P.forEach((v, k) => a.setXYZ(k, v.x, v.y, v.z));
+    a.needsUpdate = true; this.wingMesh.geometry.computeVertexNormals();
+  }
+
   // ---------------- rails and boxes ----------------
   // Lock onto a rail, box or log. Riding straight onto one locks on by itself; holding the grind
   // button (E / stick click) pulls you on from further away (and with left/right, into a boardslide).
@@ -853,6 +997,18 @@ export class Rider {
       return;
     }
     root.position.copy(this.pos);
+    if (this.state === 'fly') {
+      // lie flat, head first along the flight path, nose a little down when diving, banked into turns
+      const F = new THREE.Vector3(Math.sin(this.flyYaw), -Math.sin(this.flyGamma * 0.45 + 0.05), -Math.cos(this.flyYaw)).normalize();
+      const upW = new THREE.Vector3(0, 1, 0).addScaledVector(F, -F.y).normalize();
+      upW.applyAxisAngle(F, -this.flyBank * 0.7);
+      const X = new THREE.Vector3().crossVectors(F, upW).normalize();
+      // root axes: +y -> forward (head), +z -> up (back), so the body's chest (root -z) faces the snow
+      root.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, F, upW));
+      root.position.copy(this.pos);
+      this._flyPose();
+      return;
+    }
     if (this.state === 'crash' && this.getupT >= 0) {
       const e = this.getupT * this.getupT * (3 - 2 * this.getupT);
       root.quaternion.slerpQuaternions(this.getupFromQ, this.getupToQ, e);
@@ -873,8 +1029,11 @@ export class Rider {
         alignN = this._alignN || (this._alignN = new THREE.Vector3());
         alignN.set(this.normal.x - upright * k * sx, this.normal.y, this.normal.z - upright * k * sz).normalize();
       }
+      // out of a halfpipe wall: stay tipped in line with the wall so you come back down ready to ride it
+      const pipeFly = this.state === 'air' && this.pipeAir && this.pipeN;
+      if (pipeFly) alignN = this.pipeN;
       const targetAlign = new THREE.Quaternion().setFromUnitVectors(UP, alignN);
-      this.alignQ.slerp(targetAlign, 1 - Math.exp(-(onSnow ? 18 : 3) * dt));
+      this.alignQ.slerp(targetAlign, 1 - Math.exp(-(onSnow ? 18 : pipeFly ? 6 : 3) * dt));
       const q = new THREE.Quaternion();
       if (onSnow) {
         // brake: skid the board sideways onto the edge you were riding (toe or heel)
@@ -894,6 +1053,13 @@ export class Rider {
           .multiply(new THREE.Quaternion().setFromAxisAngle(UP, -this.airYaw));
       }
       root.quaternion.copy(q);
+      if (this.state === 'ride' && this.standT < 1) {
+        // getting off the chair: slide forward off the seat and stand up
+        this.standT = Math.min(1, this.standT + dt / 0.9);
+        const e = this.standT * this.standT * (3 - 2 * this.standT);
+        root.quaternion.slerpQuaternions(this.standFromQ, q, e);
+        root.position.lerpVectors(this.standFromPos, this.pos, e);
+      }
     }
     this._updatePose(dt, input);
   }
