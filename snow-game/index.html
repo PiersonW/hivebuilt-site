@@ -27,6 +27,8 @@
   <div id="push-hint" class="hidden"></div>
   <div id="trick-live"></div>
   <div id="race-hud" class="hidden"></div>
+  <div id="comp-hud" class="hidden"></div>
+  <div id="lodge-hint" class="hidden"></div>
   <div id="race-result" class="hidden"></div>
   <div id="popups"></div>
   <div id="controls-help"></div>
@@ -51,13 +53,14 @@
   </div>
   <p id="pad-help" class="warn hidden">Controller not reaching the game? Hold the Menu button (three lines) until a menu appears, then choose “Use game controls”. Then press A.</p>
   <button id="btn-start" class="big">🚁 Helicopter drop</button>
+  <button id="btn-lodge" class="opt lodge-btn">🏠 Lodge · competitions <span class="wallet">💰 <span class="cash-amt">$0</span></span></button>
   <div class="menu-row">
     <button id="btn-summit" class="opt small">Start at the summit</button>
     <button id="btn-ach" class="opt small">🏆 Achievements</button>
     <button id="btn-music" class="opt small toggle on">🎵 Music</button>
     <button id="btn-fullscreen" class="opt small">Full screen</button>
   </div>
-  <p class="hint">Keyboard: ↑/↓ snowboarder or skier · ←/→ stance · Enter to start · T achievements<br>Xbox: D-pad up/down rider · left/right stance · A to start · Y achievements</p>
+  <p class="hint">Keyboard: ↑/↓ snowboarder or skier · ←/→ stance · Enter to start · L lodge &amp; competitions · T achievements<br>Xbox: D-pad up/down rider · left/right stance · A to start · X lodge · Y achievements</p>
   <div id="menu-controls"></div>
 </div>
 
@@ -89,6 +92,13 @@
 </div>
 
 <div id="ach-toast"></div>
+<div id="cash-toast" class="hidden"></div>
+<div id="lodge-panel" class="hidden">
+  <div class="lodge-head"><div class="panel-title">🏠 Base Lodge · Competitions</div><div class="wallet big-wallet">💰 <span class="cash-amt">$0</span><small>Spend it on upgrades (coming soon)</small></div></div>
+  <div id="lodge-cards"></div>
+  <div id="lodge-detail"></div>
+  <div class="lodge-foot"><span id="lodge-help"></span><button id="lodge-close" class="opt small">Back outside</button><button id="lodge-enter" class="big">Sign up</button></div>
+</div>
 <div id="ach-panel" class="hidden"><div id="ach-body"></div><button id="ach-close" class="opt small">Close (Esc / B)</button></div>
 
 <div id="replay-ui" class="hidden">
@@ -101,6 +111,6 @@
   <div class="muted">Drag or right stick to orbit</div>
 </div>
 
-<script type="module" src="src-v17/main.js"></script>
+<script type="module" src="src-v18/main.js"></script>
 </body>
 </html>

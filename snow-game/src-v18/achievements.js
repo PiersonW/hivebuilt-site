@@ -47,6 +47,7 @@ export const ACHIEVEMENTS = [
   { id: 'jump_land', icon: '🎿', name: 'Ski Jumper', desc: 'Land the long jump on the landing hill.', group: 'Racing' },
   { id: 'jump_k', icon: '🎯', name: 'K-Point', desc: 'Land the long jump at 100 m or more.', group: 'Racing' },
   { id: 'jump_far', icon: '🦅', name: 'Hill Flyer', desc: 'Land the long jump at 120 m or more.', group: 'Racing' },
+  { id: 'jump_fly', icon: '🪽', name: 'Ski Flyer', desc: 'Land the long jump at 140 m or more (hold ↑ in the air).', group: 'Racing' },
   // gaps
   { id: 'gap_chute', icon: '🎯', name: 'Chute Gap', desc: 'Clear the Rocky Chute cliff and land 25 m past the edge.', group: 'Gaps' },
   { id: 'gap_lift', icon: '🎯', name: 'Lift Line Gap', desc: 'Jump clean over a chairlift line.', group: 'Gaps', hidden: true },
@@ -83,6 +84,7 @@ export class Achievements {
     this.data.done[id] = Date.now();
     this._save();
     this.queue.push(this.byId[id]);
+    if (this.onUnlock) this.onUnlock(this.byId[id]);
     return true;
   }
 

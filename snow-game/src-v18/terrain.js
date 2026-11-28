@@ -516,6 +516,14 @@ export class Terrain {
     if (k <= 0) return null;
     return { u, l, h: this.jumpProfile(Math.max(0, u)), k };
   }
+  // within `m` metres of the long jump's hill and banks?
+  nearJump(x, z, m = 0) {
+    const J = this.jump; if (!J) return false;
+    const dx = x - J.ox, dz = z - J.oz, u = dx * J.ax + dz * J.az, l = dx * J.cx + dz * J.cz;
+    return u > -6 - m && u < J.L + m && Math.abs(l) < this.jumpHW(Math.max(0, u)) + this.jumpBW(u) + m;
+  }
+  // on the inrun above the takeoff lip?
+  onJumpInrun(x, z) { const w = this.jumpWeight(x, z); return !!(w && w.u < LONG_JUMP.edgeU + 1 && Math.abs(w.l) < 4.5); }
   // on the takeoff table (where a launch counts as a long jump)?
   onJumpTable(x, z) { const w = this.jumpWeight(x, z); return !!(w && w.u > LONG_JUMP.edgeU - 14 && w.u < LONG_JUMP.edgeU + 3 && Math.abs(w.l) < 4.5); }
 
@@ -1259,6 +1267,8 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
       const u = r() * c.len, v = 0.6 + r() * 1.6;
       spots.push([c.ax + c.ex * u + c.nx * v, c.az + c.ez * u + c.nz * v, 0.9 + r() * 1.5]);
     }
+    // keep the long jump's inrun, table and landing hill clear of rocks
+    for (let k = spots.length - 1; k >= 0; k--) if (this.nearJump(spots[k][0], spots[k][1], 5 + spots[k][2])) spots.splice(k, 1);
     const mat = new THREE.MeshStandardMaterial({ color: 0x6f6b68, flatShading: true, roughness: 1 });
     const im = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), mat, spots.length);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();

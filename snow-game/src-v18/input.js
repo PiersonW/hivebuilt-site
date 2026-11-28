@@ -137,6 +137,7 @@ export const CONTROLS = [
   ['Grab 4 (Nose / Tail)', 'F', 'Y'],
   ['Phantom Flip (gear off feet)', 'W', 'RB'],
   ['Grind: hold it to get on a rail, box or log (+ ← → = boardslide)', 'E', 'Stick click'],
-  ['Restart / menu', 'R / Esc', 'Menu / View'],
+  ['Restart (retries a competition) / menu', 'R / Esc', 'Menu / View'],
+  ['Lodge competitions (stopped at the lodge door)', 'Enter', 'A'],
   ['Pause', 'P', '—'],
 ];

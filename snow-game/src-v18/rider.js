@@ -27,6 +27,7 @@ export const TUNE = {
   landFlipTol: 1.25,      // rad (~72 deg) off upright and you crash
   phantomTime: 0.75,
   airGravity: 0.85,       // a little floaty in the air (arcade)
+  jumpLift: 0.22,         // long jump flight position: share of gravity held up at ~60 mph
   stick: 0.0035,          // how hard the board holds the snow over rolls (higher = fewer little hops)
   maxLaunch: 7.5,         // m/s off a kicker, measured away from the landing slope
   maxSpeed: 28,           // m/s (~63 mph): above this the snow starts holding you back
@@ -213,6 +214,14 @@ export class Rider {
     if (this.state === 'air') { hipH = 0.78; lean = 0.35; }
     if (grab) { hipH = 0.8; lean = 0.85; boardLift = 0.42; }
     const ski = this.sport === 'ski';
+    // skiers fold right down into a tuck (chest on the knees)
+    if (ski && this.state === 'ride') { hipH = 0.92 - 0.42 * this.crouch; lean = 0.15 + 0.8 * this.crouch; }
+    // inrun crouch on the long jump: arms back along the sides
+    const inrun = this.state === 'ride' && !this.npc && this.crouch > 0.3 && this.terrain.onJumpInrun && this.terrain.onJumpInrun(this.pos.x, this.pos.z);
+    const vpT = this.state === 'air' && this.jumpFlight && !grab ? (this.vPose || 0) : 0;
+    P.vp = damp(P.vp || 0, vpT, 12, dt);
+    const vp = P.vp;
+    if (vp > 0.01) { hipH += (0.86 - hipH) * vp; lean += (1.25 - lean) * vp; rx += ((ski ? 0.5 : 0.2) - rx) * vp; }
     if (!ski) {
       if (grab === 'Nose Grab') { rx = 0.35; lean = 0.95; }
       if (grab === 'Method') { rz = -sig * 0.75; boardLift = 0.6; lean = 0.55; }
@@ -273,7 +282,13 @@ export class Rider {
     const bindings = ski ? [new THREE.Vector3(-0.14, 0.06, 0), new THREE.Vector3(0.14, 0.06, 0)] : [new THREE.Vector3(0, 0.07, -0.27), new THREE.Vector3(0, 0.07, 0.27)];
     if (ski) {
       // side-stepping: the uphill ski (+x) steps up, then the other one follows
-      if (!this._skiBase) this._skiBase = this.skisG.children.map(m => m.position.clone());
+      if (!this._skiBase) { this._skiBase = this.skisG.children.map(m => m.position.clone()); for (const m of this.skisG.children) m.rotation.order = 'YXZ'; }
+      if (vp > 0.01 || this.skiV) {
+        // flight position: ski tips spread into a V around the bindings
+        const a = 0.3 * vp;
+        this.skisG.children.forEach((m, i) => { const b = this._skiBase[i], sg = Math.sign(b.x); m.position.set(b.x - sg * a * (0.05 - b.z), b.y, b.z); m.rotation.y = sg * a; });
+        this.skiV = vp > 0.01;
+      }
       if (climbing) {
         const a = 2 * Math.PI * cp;
         const st = [{ x: -0.1 * Math.sin(a + Math.PI), y: 0.1 * Math.max(0, Math.sin(a + Math.PI)) }, { x: 0.1 * Math.sin(a), y: 0.1 * Math.max(0, Math.sin(a)) }];
@@ -410,6 +425,11 @@ export class Rider {
       if (grab === 'Melon') t[lead] = edge(-sig, 0);
       if (grab === 'Method') { t[lead] = edge(-sig, 0); t[back] = sh[back].clone().add(new THREE.Vector3((back === 0 ? 1 : -1) * 0.3, 0.45, -0.1)); }
       if (grab === 'Nose Grab') t[lead] = this._boardToBody(new THREE.Vector3(0, 0.08, -0.7), false);
+    }
+    if (!grab && !phantom && (vp > 0.01 || inrun)) {
+      // ski jumper: arms straight back beside the hips, hands just off the body
+      const k = Math.max(vp, inrun ? Math.min(1, this.crouch * 1.3) : 0);
+      for (let i = 0; i < 2; i++) t[i].lerp(hipC.clone().add(new THREE.Vector3((i === 0 ? 1 : -1) * 0.24, 0.02, -0.32)), k);
     }
     if (phantom) { t[0] = sh[0].clone().add(new THREE.Vector3(0.3, 0.5, 0.1)); t[1] = sh[1].clone().add(new THREE.Vector3(-0.3, 0.5, 0.1)); }
     if (this.state === 'fly' && this.chute) {   // hands up on the steering toggles
@@ -686,6 +706,9 @@ export class Rider {
     }
     this.state = 'air';
     this.airTime = 0;
+    // off the long jump's table: ↑ in the air leans you out over your skis into the flight position
+    this.jumpFlight = !this.pipeAir && !!(this.terrain.onJumpTable && this.terrain.onJumpTable(this.pos.x, this.pos.z));
+    this.vPose = 0;
     this.airYaw = this.yaw + (this.switch ? Math.PI : 0);
     this.pipeYaw0 = this.airYaw;
     this.flip = 0; this.flipVel = 0; this.spinVel = 0;
@@ -703,7 +726,14 @@ export class Rider {
     this.airTime += dt;
     this.vel.y -= G * T.airGravity * dt;
     const sp = this.vel.length();
-    this.vel.multiplyScalar(1 - 0.0012 * sp * dt);
+    // long jump flight position: body flat over the skis, arms back, skis in a V. Less drag and some lift,
+    // so you float further down the hill. Only off the jump table; it builds up over about half a second.
+    if (this.jumpFlight) {
+      this.vPose = damp(this.vPose || 0, input.up && this.phantomT < 0 && !input.grab ? 1 : 0, 4, dt);
+      const vh = Math.hypot(this.vel.x, this.vel.z);
+      if (this.vel.y < 3) this.vel.y += this.vPose * T.jumpLift * G * T.airGravity * Math.min(1.5, (vh / 27) ** 2) * dt;
+    } else this.vPose = 0;
+    this.vel.multiplyScalar(1 - 0.0012 * (1 - 0.6 * (this.vPose || 0)) * sp * dt);
     this.pos.addScaledVector(this.vel, dt);
     this.crouch = damp(this.crouch, 0.3, 6, dt);
     this.lean = damp(this.lean, 0, 4, dt);
@@ -727,7 +757,9 @@ export class Rider {
     }
     const dYaw = this.spinVel * dt;
     this.airYaw += dYaw;
-    const flipIn = (input.up ? 1 : 0) - (input.down ? 1 : 0);
+    // on a long jump ↑ is the flight position, not a front flip; ↓ still flips once you're well clear of
+    // the table (so a tuck held through the takeoff doesn't throw you into a backflip)
+    const flipIn = this.jumpFlight ? -(input.down && this.airTime > 0.5 ? 1 : 0) : (input.up ? 1 : 0) - (input.down ? 1 : 0);
     if (flipIn) this.flipVel = damp(this.flipVel, flipIn * T.flipRate, 7, dt);
     else {
       this.flipVel = damp(this.flipVel, 0, 8, dt);
@@ -777,7 +809,7 @@ export class Rider {
     const sloppy = Math.min(1, Math.abs(Math.abs(d) > Math.PI / 2 ? Math.PI - Math.abs(d) : d) / T.landSpinTol);
     this.vel.multiplyScalar((1 - 0.18 * sloppy * sloppy) * (1 - Math.min(0.25, impact * 0.012)));
     this.state = 'ride';
-    this.grab = null; this.flip = 0; this.pipeAir = false;
+    this.grab = null; this.flip = 0; this.pipeAir = false; this.jumpFlight = false; this.vPose = 0;
     this.crouch = 0.7 + Math.min(0.3, impact / 30);
     this.landBump = Math.min(0.35, 0.08 + impact * 0.02);   // arms drop and swing with the landing
     this.events.push({ type: 'land', impact, switch: this.switch, sloppy });
@@ -786,7 +818,7 @@ export class Rider {
   doCrash(reason) {
     if (this.state === 'crash') return;
     this.state = 'crash';
-    this.crashT = 0; this.getupT = -1;
+    this.crashT = 0; this.getupT = -1; this.jumpFlight = false; this.vPose = 0;
     this.grab = null; this.phantomT = -1; this.rail = null; this.boardslide = 0; this.pipeAir = false;
     this.crashSpin.set((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 10);
     this.crashQ.copy(this.root.quaternion);
@@ -1267,7 +1299,7 @@ export class Rider {
           .multiply(new THREE.Quaternion().setFromAxisAngle(UP, -vis))
           .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), lean));
       } else {
-        q.setFromAxisAngle(this.flipAxis, this.flip)
+        q.setFromAxisAngle(this.flipAxis, this.flip + 0.3 * (this.pose.vp || 0))      // long jump flight: tipped forward over the skis
           .multiply(this.alignQ)
           .multiply(new THREE.Quaternion().setFromAxisAngle(UP, -this.airYaw));
       }

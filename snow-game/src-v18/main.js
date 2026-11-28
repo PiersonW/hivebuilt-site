@@ -20,6 +20,7 @@ import { Music } from './music.js';
 import { LONG_JUMP } from './terrain.js';
 import { YETI, PIPE } from './terrain.js';
 import { SKI_GRABS } from './rider.js';
+import { Comps, COMPS, COMP_BY_ID, PRIZES, FINISH_PRIZE, ACH_PRIZE, fmtValue, ordinal, money } from './comps.js';
 
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('game');
@@ -59,7 +60,8 @@ const LIFTS = [
 ];
 const terrain = new Terrain(scene, { sunDir: SUN_DIR, shadowRes: LOW_GFX ? 1.5 : 1.0, treeSpacing: LOW_GFX ? 12 : 9.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
 buildRange(scene, terrain);
-buildLodge(scene, terrain, -40, BASE_Z - 68);
+const LODGE = { x: -40, z: BASE_Z - 68 };
+buildLodge(scene, terrain, LODGE.x, LODGE.z);
 for (const dx of [-9.5, 0, 9.5]) terrain.addObstacle(-40 + dx, BASE_Z - 68, 6.5, 12, 'lodge');
 const lifts = LIFTS.map(l => new Chairlift(scene, terrain, l.bottom, l.top, { name: l.name, speed: l.speed }));
 let curLift = lifts[0];
@@ -81,6 +83,14 @@ const kickMusic = () => music.start();
 window.addEventListener('pointerdown', kickMusic);
 window.addEventListener('keydown', (e) => { if (e.code !== 'KeyN') kickMusic(); });
 const ach = new Achievements(document.getElementById('ach-toast'));
+// competitions at the lodge, and the money you win (saved in this browser)
+const comps = new Comps();
+const cashToastEl = document.getElementById('cash-toast');
+let cashToastT = 0;
+function showCash() { for (const el of document.querySelectorAll('.cash-amt')) el.textContent = money(comps.cash); }
+comps.onCash = (n) => { showCash(); cashToastEl.innerHTML = `+${money(n)}<small>💰 ${money(comps.cash)}</small>`; cashToastEl.classList.remove('hidden'); cashToastT = 3; };
+ach.onUnlock = () => comps.addCash(ACH_PRIZE);
+showCash();
 // other skiers and snowboarders, on the runs and on the chairs
 const npcs = new Npcs(scene, terrain, {
   count: LOW_GFX ? 7 : 14, lifts, laneEntrance,
@@ -182,7 +192,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
+window.__game = { comps, enterComp: (id) => enterComp(id), openLodge: () => openLodge(), getComp: () => comp, music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -207,6 +217,7 @@ document.getElementById('btn-ski').onclick = () => setSport('ski');
 // Start a run at the top (or at `at`, e.g. the lift unload point).
 function startRun(at = null, yaw = 0) {
   game.mode = 'run';
+  comp = null; compHudEl.classList.add('hidden');
   // drop keyboard focus from the menu (a focused button or the name box would eat the arrow keys)
   if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
   race.reset(); raceHudEl.classList.add('hidden');
@@ -312,10 +323,10 @@ const racerName = () => nameEl.value.trim() || 'Player';
 let raceResultT = 0, raceDelta = null;
 function updateRace(dt) {
   for (const ev of race.update(dt, rider, racerName(), game.sport)) {
-    if (ev.type === 'start') { hud.popup('GO!', 0); raceDelta = null; }
+    if (ev.type === 'start') { hud.popup('GO!', 0); raceDelta = null; if (comp && comp.id === 'race') comp.state = 'live'; }
     else if (ev.type === 'gate') raceDelta = ev.delta;
     else if (ev.type === 'miss') { hud.popup('Missed gate <small>+2 s</small>', 0, true); raceDelta = ev.delta; }
-    else if (ev.type === 'abort') hud.popup(`Race over: ${ev.why}`, 0, true);
+    else if (ev.type === 'abort') { hud.popup(`Race over: ${ev.why}`, 0, true); if (comp && comp.id === 'race' && comp.state !== 'done') finishComp(null, ev.why); }
     else if (ev.type === 'finish') {
       const head = ev.pr ? (ev.prev === null ? 'First time on the board!' : `New personal best! (was ${fmtRace(ev.prev)})`) : `Your best: ${fmtRace(race.best)}`;
       raceResultEl.innerHTML = `<h2>🏁 ${fmtRace(ev.time)}</h2><div class="${ev.pr ? 'pr' : ''}">${head}</div>` +
@@ -326,6 +337,7 @@ function updateRace(dt) {
       if (!ev.missed) ach.unlock('race_clean');
       if (ev.pr && ev.prev !== null) ach.unlock('race_pr');
       if (!ev.missed && ev.time < 50) ach.unlock('race_fast');
+      if (comp && comp.id === 'race' && comp.state !== 'done') finishComp(ev.time);
     }
   }
   if (race.state === 'running') {
@@ -350,6 +362,7 @@ function showJumpResult(r) {
   ach.unlock('jump_land');
   if (r.dist >= LONG_JUMP.K) ach.unlock('jump_k');
   if (r.dist >= 120) ach.unlock('jump_far');
+  if (r.dist >= 140) ach.unlock('jump_fly');
 }
 // on the inrun: show the hill record and your best
 function updateJumpHud() {
@@ -357,10 +370,176 @@ function updateJumpHud() {
   const w = rider.state === 'ride' ? terrain.jumpWeight(rider.pos.x, rider.pos.z) : null;
   if (w && w.k > 0.5 && w.u < LONG_JUMP.edgeU) {
     const mine = longJump.bestFor(racerName()), rec = longJump.best;
-    raceHudEl.innerHTML = `🎿 LONG JUMP · ${Math.round(rider.speed * 2.237)} mph<small>${rec !== null ? `Hill record ${rec.toFixed(1)} m` : 'No record yet'}${mine !== null ? ` · your best ${mine.toFixed(1)} m` : ''}</small><small>tuck, then jump at the blue lip</small>`;
+    raceHudEl.innerHTML = `🎿 LONG JUMP · ${Math.round(rider.speed * 2.237)} mph<small>${rec !== null ? `Hill record ${rec.toFixed(1)} m` : 'No record yet'}${mine !== null ? ` · your best ${mine.toFixed(1)} m` : ''}</small><small>hold ↓ to tuck, jump at the blue lip, then hold ↑ in the air to fly</small>`;
     raceHudEl.classList.remove('hidden');
   } else if (race.state !== 'running') raceHudEl.classList.add('hidden');
 }
+
+// ---------- competitions (sign up at the Base Lodge) ----------
+const compHudEl = document.getElementById('comp-hud');
+const lodgeEl = document.getElementById('lodge-panel'), lodgeHintEl = document.getElementById('lodge-hint');
+let comp = null;          // { id, state: 'ready' | 'live' | 'done', score, stillT, offT }
+let lodgeSel = 0;
+const parkRun = terrain.runById.park, parkIdx = terrain.runs.indexOf(parkRun);
+const PARK_START_S = 28, PARK_FINISH_S = parkRun.sAtZ(-975);      // the entrance banner .. just above the halfpipe
+const LODGE_FRONT = new THREE.Vector3(LODGE.x, 0, LODGE.z + 13);
+const yawAlong = (x, z) => Math.atan2(x, -z);
+
+// where each competition starts
+function compStart(id) {
+  let x, z, yaw;
+  if (id === 'pipe') { const P = terrain.pipe; x = P.ox - P.ax * 14; z = P.oz - P.az * 14; yaw = yawAlong(P.ax, P.az); }
+  else if (id === 'park') { const a = parkRun.at(PARK_START_S - 14); x = a.x; z = a.z; yaw = yawAlong(a.tx, a.tz); }
+  else if (id === 'jump') { const J = terrain.jump; x = J.ox + J.ax * 3; z = J.oz + J.az * 3; yaw = yawAlong(J.ax, J.az); }
+  else { const a = race.line(race.startS - 14); x = a.x; z = a.z; yaw = yawAlong(a.tx, a.tz); }
+  return { pos: new THREE.Vector3(x, terrain.heightAt(x, z), z), yaw };
+}
+
+function enterComp(id) {
+  const c = COMP_BY_ID[id], st = compStart(id);
+  lodgeEl.classList.add('hidden'); lodgeHintEl.classList.add('hidden');
+  startRun(st.pos, st.yaw);
+  rider.vel.set(Math.sin(st.yaw), 0, -Math.cos(st.yaw)).multiplyScalar(1.5);
+  game.holdJump = true;
+  comp = { id, state: 'ready', score: 0, stillT: 0, offT: 0 };
+  raceResultEl.classList.add('hidden'); raceResultT = 0;
+  hud.popup(`${c.icon} ${c.name} competition`, 0);
+}
+
+function finishComp(value, why = null) {
+  const c = COMP_BY_ID[comp.id];
+  comp.state = 'done';
+  const r = comps.finish(comp.id, value, racerName(), game.sport);
+  const mine = value === null ? null : { value, name: racerName(), sport: game.sport };
+  const medal = r.place === 1 ? '🥇' : r.place === 2 ? '🥈' : r.place === 3 ? '🥉' : c.icon;
+  let html = value === null
+    ? `<h2>${c.icon} Did not finish</h2><div class="muted">${why || ''}</div>`
+    : `<h2>${medal} ${ordinal(r.place)} place · ${fmtValue(c, value)}</h2>` +
+      `<div class="pr">+${money(r.prize)} prize money · wallet ${money(comps.cash)}</div>` +
+      `<div class="${r.pb ? 'pr' : 'muted'}">${r.pb ? (r.prev === null ? 'Your first result in this event!' : `Personal best! (was ${fmtValue(c, r.prev)})`) : `Your best: ${fmtValue(c, comps.data.best[comp.id].value)}`}</div>`;
+  html += `<div class="panel-title" style="margin-top:10px">${c.name} standings</div>${comps.boardHtml(comp.id, mine)}` +
+    `<div class="muted">${input.padName ? 'Menu button' : 'R'}: try again · ${input.padName ? 'View' : 'Esc'}: menu (pick another event at the lodge)</div>`;
+  raceResultEl.innerHTML = html;
+  raceResultEl.classList.remove('hidden'); raceResultT = 14;
+  compHudEl.classList.add('hidden');
+}
+function cancelComp(why) { hud.popup(`${COMP_BY_ID[comp.id].name} comp cancelled: ${why}`, 0, true); comp = null; compHudEl.classList.add('hidden'); }
+
+// every frame while riding in a competition: start, finish, and the score on screen
+function updateComp(dt) {
+  if (!comp || comp.state === 'done') return;
+  const c = COMP_BY_ID[comp.id], p = rider.pos, onSnow = rider.state === 'ride';
+  const busy = rider.state === 'air' || rider.state === 'grind' || rider.state === 'crash';
+  let line = '';
+  if (comp.id === 'pipe') {
+    const P = terrain.pipe, pc = pipeCoords(p);
+    if (comp.state === 'ready') {
+      if (pc.u > 0 && Math.abs(pc.l) < PIPE.outer) comp.state = 'live';
+      else if (pc.u < -60 || Math.abs(pc.l) > 60) { cancelComp('Left the halfpipe'); return; }
+      line = 'Drop in! Ride down the pipe and land tricks off the walls';
+    } else {
+      comp.stillT = onSnow && rider.speed < 0.8 ? comp.stillT + dt : 0;
+      const out = pc.u > P.L + 3 || Math.abs(pc.l) > PIPE.outer + 8;
+      if ((out || comp.stillT > 4) && !busy) { finishComp(comp.score > 0 ? comp.score : null, 'No tricks landed'); return; }
+      line = `${Math.max(0, Math.round(P.L - pc.u))} m of pipe left`;
+    }
+  } else if (comp.id === 'park') {
+    const q = terrain._q(p.x, p.z), s = terrain.runS[parkIdx][q], d = terrain.runDist[parkIdx][q];
+    comp.offT = d > parkRun.hw + 35 ? comp.offT + dt : 0;
+    if (comp.offT > 3) { if (comp.state === 'live') finishComp(null, 'Left the course'); else cancelComp('Left the park'); return; }
+    if (comp.state === 'ready') { if (s > PARK_START_S) comp.state = 'live'; line = 'Go through the orange banner to start'; }
+    else {
+      if (s > PARK_FINISH_S && !busy) { finishComp(comp.score > 0 ? comp.score : null, 'No tricks landed'); return; }
+      line = `${Math.max(0, Math.round(PARK_FINISH_S - s))} m to the finish (above the halfpipe)`;
+    }
+  } else if (comp.id === 'jump') {
+    const w = terrain.jumpWeight(p.x, p.z);
+    if (comp.state === 'ready') {
+      if (!terrain.nearJump(p.x, p.z, 20)) { cancelComp('Left the jump hill'); return; }
+      if (w && w.u > LONG_JUMP.edgeU + 8 && onSnow) { finishComp(null, 'Rolled past the lip without jumping'); return; }
+      line = 'Tuck (↓) down the inrun, jump at the blue lip, hold ↑ in the air';
+    } else line = 'Fly! Hold ↑, then land it on the hill';
+  } else if (comp.id === 'race') {
+    if (comp.state === 'ready') {
+      const a = race.startLine;
+      if (Math.hypot(p.x - a.x, p.z - a.z) > 120) { cancelComp('Left the start area'); return; }
+      line = 'Ride through the start gate, then every pair of flags';
+    } else line = 'Every gate! Missed gates add 2 s';
+  }
+  const leader = fmtValue(c, comps.standings(comp.id, null)[0].value);
+  const score = comp.id === 'pipe' || comp.id === 'park' ? ` · ${Math.round(comp.score).toLocaleString()} pts` : '';
+  compHudEl.innerHTML = `${c.icon} ${c.name.toUpperCase()} COMP${score}<small>Leader ${leader} · ${line}</small>`;
+  compHudEl.classList.remove('hidden');
+}
+
+// the lodge: ride up to the front door, stop, and press Enter / A
+function updateLodgeDoor(inp) {
+  const d = Math.hypot(rider.pos.x - LODGE_FRONT.x, rider.pos.z - LODGE_FRONT.z);
+  const near = d < 45 && !comp;
+  const atDoor = d < 11 && rider.state === 'ride' && rider.speed < 2.5 && !comp;
+  if (near) {
+    lodgeHintEl.innerHTML = atDoor ? `🏠 Base Lodge · <b>${input.padName ? 'A' : 'Enter'}</b> to sign up for competitions`
+      : '🏠 Base Lodge: stop at the front door to sign up for competitions';
+    lodgeHintEl.classList.remove('hidden');
+  } else lodgeHintEl.classList.add('hidden');
+  if (atDoor && inp.confirmPressed) openLodge();
+}
+
+function openLodge() {
+  game.mode = 'lodge';
+  comp = null; compHudEl.classList.add('hidden'); lodgeHintEl.classList.add('hidden');
+  race.reset(); raceHudEl.classList.add('hidden'); raceResultEl.classList.add('hidden');
+  heli.hide(); heliUi.classList.add('hidden'); replayer.stop(); liftEl.classList.add('hidden'); menuEl.classList.add('hidden');
+  hud.show(false);
+  const p = LODGE_FRONT.clone(); p.y = terrain.heightAt(p.x, p.z);
+  rider.reset(p, Math.PI);
+  rider.updateVisual(0, {});
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  renderLodge();
+  lodgeEl.classList.remove('hidden');
+}
+function closeLodge() {
+  lodgeEl.classList.add('hidden');
+  const p = LODGE_FRONT.clone(); p.y = terrain.heightAt(p.x, p.z);
+  startRun(p, Math.PI);
+  game.holdJump = true;
+}
+
+function renderLodge() {
+  showCash();
+  const usePad = !!input.padName || IS_XBOX;
+  document.getElementById('lodge-cards').innerHTML = COMPS.map((c, i) => {
+    const b = comps.data.best[c.id];
+    const lead = comps.standings(c.id, null)[0];
+    return `<button class="comp-card ${i === lodgeSel ? 'sel' : ''}" data-i="${i}"><span class="comp-icon">${c.icon}</span><b>${c.name}</b>` +
+      `<span>Leader: ${lead.me ? 'You' : lead.name} · ${fmtValue(c, lead.value)}</span>` +
+      `<span class="${b ? 'mine' : ''}">${b ? `Your best: ${fmtValue(c, b.value)} (${ordinal(b.place)})` : 'Not entered yet'}</span></button>`;
+  }).join('');
+  document.querySelectorAll('.comp-card').forEach(el => el.onclick = () => { const i = +el.dataset.i; if (i === lodgeSel) enterComp(COMPS[i].id); else { lodgeSel = i; renderLodge(); } });
+  const c = COMPS[lodgeSel];
+  document.getElementById('lodge-detail').innerHTML = `<div class="comp-desc">${c.icon} <b>${c.name}</b> · ${c.desc}</div>` +
+    `<div class="muted">Prizes: ${PRIZES.map((v, i) => `${ordinal(i + 1)} ${money(v)}`).join(' · ')} · finishing ${money(FINISH_PRIZE)} · each achievement ${money(ACH_PRIZE)}</div>` +
+    comps.boardHtml(c.id, null);
+  document.getElementById('lodge-enter').textContent = `Sign up: ${c.name}`;
+  document.getElementById('lodge-help').innerHTML = usePad ? '🎮 D-pad pick · <b>A</b> sign up · <b>B</b> back outside' : '← → pick · <b>Enter</b> sign up · <b>Esc</b> back outside · or click';
+}
+
+function updateLodge(dt, inp) {
+  const pad = (...b) => b.some(i => inp.padTaps.has(i));
+  const n = COMPS.length;
+  if (inp.leftPressed || inp.upPressed) { lodgeSel = (lodgeSel + n - 1) % n; renderLodge(); }
+  if (inp.rightPressed || inp.downPressed) { lodgeSel = (lodgeSel + 1) % n; renderLodge(); }
+  if (inp.confirmPressed) { enterComp(COMPS[lodgeSel].id); return; }
+  if (inp.menuPressed || pad(BTN.B)) { closeLodge(); return; }
+  // camera: out in front of the lodge, looking at the door
+  const t = performance.now() / 9000;
+  camera.position.set(LODGE.x + 14 + Math.sin(t) * 3, terrain.heightAt(LODGE.x, LODGE.z + 30) + 6, LODGE.z + 32);
+  camera.lookAt(LODGE.x, terrain.heightAt(LODGE.x, LODGE.z) + 3.5, LODGE.z + 4);
+  if (Math.abs(camera.fov - 62) > 0.1) { camera.fov = 62; camera.updateProjectionMatrix(); }
+  rider.updateVisual(dt, {});
+}
+document.getElementById('lodge-enter').onclick = () => enterComp(COMPS[lodgeSel].id);
+document.getElementById('lodge-close').onclick = () => closeLodge();
 
 // ---------- achievements ----------
 const achPanel = document.getElementById('ach-panel');
@@ -454,6 +633,7 @@ let glide = null;
 function startLift(l = lifts[0], doGlide = false) {
   curLift = l;
   if (race.state === 'running') race.abort();
+  comp = null; compHudEl.classList.add('hidden'); lodgeHintEl.classList.add('hidden');
   raceHudEl.classList.add('hidden');
   document.querySelector('#lift-ui .lift-name').textContent = '🚡 ' + l.name;
   game.mode = 'liftwait';
@@ -734,6 +914,8 @@ function updateLiftCamera() {
 
 function showMenu() {
   game.mode = 'menu';
+  comp = null; compHudEl.classList.add('hidden'); lodgeEl.classList.add('hidden'); lodgeHintEl.classList.add('hidden');
+  showCash();
   race.reset(); raceHudEl.classList.add('hidden'); raceResultEl.classList.add('hidden');
   heli.hide(); heliUi.classList.add('hidden');
   camBlend = null;
@@ -763,13 +945,17 @@ document.getElementById('btn-regular').onclick = () => setStance(true);
 document.getElementById('btn-goofy').onclick = () => setStance(false);
 document.getElementById('btn-start').onclick = () => startHeli();
 document.getElementById('btn-summit').onclick = () => startRun();
+document.getElementById('btn-lodge').onclick = () => openLodge();
 document.getElementById('btn-ach').onclick = () => toggleAch(true);
 document.getElementById('btn-ach-lift').onclick = () => toggleAch(true);
 document.getElementById('ach-close').onclick = () => toggleAch(false);
 
 function handleEvents() {
   for (const ev of rider.events) {
-    if (ev.type === 'takeoff') { if (!ev.fromGrind || !tricks.active) { tricks.begin(); recorder.onTakeoff(); } onTakeoffAch(); longJump.takeoff(rider.pos, rider.speed); }
+    if (ev.type === 'takeoff') {
+      if (!ev.fromGrind || !tricks.active) { tricks.begin(); recorder.onTakeoff(); } onTakeoffAch(); longJump.takeoff(rider.pos, rider.speed);
+      if (comp && comp.id === 'jump' && comp.state === 'ready' && longJump.armed) comp.state = 'live';
+    }
     else if (ev.type === 'fly-land') {
       hud.popup('Wingsuit landing!', 0);
       ach.unlock('wingsuit');
@@ -785,8 +971,10 @@ function handleEvents() {
       onLandAch(res, parts, rider.airTime);
       const lj = longJump.land(rider.pos, racerName(), game.sport);
       if (lj) showJumpResult(lj);
+      if (lj && comp && comp.id === 'jump' && comp.state !== 'done') finishComp(lj.dist, lj.dist === null ? 'Landed off the hill' : null);
       if (res && res.points > 0) {
         game.score += res.points;
+        if (comp && comp.state === 'live' && (comp.id === 'pipe' || comp.id === 'park')) comp.score += res.points;
         game.tricksLanded++;
         if (!game.bestTrick || res.points > game.bestTrick.points) game.bestTrick = res;
         recorder.onTrick(res.mult > 1 ? `${res.name} x${res.mult}` : res.name, res.points);
@@ -797,7 +985,7 @@ function handleEvents() {
     } else if (ev.type === 'crash') {
       const res = tricks.finish(false, rider.airTime);
       if (/tree/i.test(ev.reason)) ach.addCount('trees', 1);
-      if (longJump.armed) { longJump.crashed(); hud.popup('Fell on the long jump: no distance', 0, true); }
+      if (longJump.armed) { longJump.crashed(); hud.popup('Fell on the long jump: no distance', 0, true); if (comp && comp.id === 'jump' && comp.state !== 'done') finishComp(null, 'Fell on the landing'); }
       airCtx = null;
       game.crashes++;
       hud.popup(`${ev.reason}${res ? `<span class="pts">lost: ${res.name}</span>` : ''}`, 0, true);
@@ -844,6 +1032,7 @@ function tick(dt, now) {
   if (inp.helpPressed) hud.toggleHelp();
 
   ach.update(dt);
+  if (cashToastT > 0) { cashToastT -= dt; if (cashToastT <= 0) cashToastEl.classList.add('hidden'); }
   heli.update(dt);
   if (inp.padTaps.size) kickMusic();
   if (inp.taps.has('KeyN')) toggleMusic();
@@ -859,6 +1048,7 @@ function tick(dt, now) {
     if (inp.upPressed) setSport('board');
     if (inp.downPressed) setSport('ski');
     if (inp.confirmPressed) startHeli();
+    else if (inp.taps.has('KeyL') || inp.padTaps.has(BTN.X)) openLodge();
     // slow orbit preview of the rider at the top
     const t = now / 4000;
     camera.position.set(rider.pos.x + Math.sin(t) * 7, rider.pos.y + 2.5, rider.pos.z + Math.cos(t) * 7);
@@ -866,8 +1056,10 @@ function tick(dt, now) {
     rider.updateVisual(dt, inp);
   } else if (game.mode === 'heli') {
     updateHeliMode(dt, inp);
+  } else if (game.mode === 'lodge') {
+    updateLodge(dt, inp);
   } else if (game.mode === 'run') {
-    if (inp.restartPressed) startRun();
+    if (inp.restartPressed) { if (comp) enterComp(comp.id); else startRun(); }
     else if (inp.menuPressed) showMenu();
     if (inp.pausePressed) game.paused = !game.paused;
     acc += game.paused ? 0 : dt;
@@ -875,7 +1067,9 @@ function tick(dt, now) {
     // and the arrows (left stick) swing the camera instead of moving you
     const canLook = (rider.state === 'ride' && rider.speed < (freeLook.on ? 4 : 2)) || (rider.state === 'fly' && rider.chute);
     const looking = !!inp.brake && canLook;
-    const stepInp = looking ? { ...inp, steer: 0, up: false, down: false, jump: false } : inp;
+    // (the A press that signed you up shouldn't also pop a jump at the start line)
+    if (game.holdJump && !inp.jump) game.holdJump = false;
+    const stepInp = looking ? { ...inp, steer: 0, up: false, down: false, jump: false } : game.holdJump ? { ...inp, jump: false } : inp;
     updateFreeLook(dt, inp, looking);
     while (acc >= STEP) {
       prevPos.copy(rider.pos);
@@ -942,6 +1136,8 @@ function tick(dt, now) {
     if (game.mode === 'run') trackAch(dt);
     if (game.mode === 'run') updateRace(dt);
     if (game.mode === 'run') updateJumpHud();
+    if (game.mode === 'run') updateComp(dt);
+    if (game.mode === 'run') updateLodgeDoor(inp);
     // stopped on a flat: remind how to push along
     const slow = game.mode === 'run' && rider.state === 'ride' && rider.speed < 1.2 && !inLane && rider.pushAmt < 0.2;
     pushHint.t = slow ? pushHint.t + dt : 0;

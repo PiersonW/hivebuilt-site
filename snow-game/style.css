@@ -140,3 +140,34 @@ kbd { font-family: inherit; font-size: 10px; border: 1px solid rgba(255,255,255,
 .race-board { margin: 10px auto 0; border-collapse: collapse; font-size: 15px; }
 .race-board td { padding: 3px 10px; text-align: left; } .race-board tr.me td { color: #ffd23a; font-weight: bold; }
 .hl .pad-badge { font-style: normal; font-size: 12px; background: #2fbf71; color: #0b1d12; border-radius: 10px; padding: 1px 8px; margin-left: 8px; font-weight: bold; }
+
+/* competitions and the lodge */
+#comp-hud { position: absolute; top: 118px; left: 50%; transform: translateX(-50%); background: rgba(20, 60, 130, 0.82);
+  padding: 6px 16px; border-radius: 10px; font-size: 18px; font-weight: bold; white-space: nowrap; font-variant-numeric: tabular-nums; text-align: center; }
+#comp-hud small { display: block; font-size: 13px; font-weight: normal; opacity: 0.9; }
+#lodge-hint { position: absolute; bottom: 30%; left: 50%; transform: translateX(-50%); background: rgba(90, 52, 24, 0.85);
+  padding: 8px 16px; border-radius: 10px; font-size: 16px; white-space: nowrap; }
+#lodge-hint b { color: #ffd23a; }
+#cash-toast { position: fixed; top: 14px; right: 16px; background: rgba(20, 90, 45, 0.9); border: 2px solid #7dff9a; border-radius: 12px;
+  padding: 8px 14px; font-size: 22px; font-weight: bold; z-index: 45; text-align: right; }
+#cash-toast small { display: block; font-size: 12px; font-weight: normal; opacity: 0.9; }
+.lodge-btn { margin-top: 10px; opacity: 0.95; }
+.wallet { color: #ffd23a; font-weight: bold; margin-left: 10px; }
+#lodge-panel { position: fixed; inset: 5% 7%; background: rgba(40, 24, 12, 0.94); border: 2px solid #b8834f; border-radius: 14px;
+  padding: 16px 22px; overflow-y: auto; z-index: 30; display: flex; flex-direction: column; gap: 10px; }
+.lodge-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.lodge-head .panel-title { font-size: 22px; font-weight: bold; margin: 0; opacity: 1; }
+.big-wallet { font-size: 22px; margin: 0; text-align: right; }
+.big-wallet small { display: block; font-size: 11px; font-weight: normal; color: #fff; opacity: 0.7; }
+#lodge-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.comp-card { text-align: left; padding: 10px 12px; border-color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.06); display: flex; flex-direction: column; gap: 2px; }
+.comp-card.sel { border-color: #ffd23a; background: rgba(255, 210, 58, 0.16); }
+.comp-card .comp-icon { font-size: 28px; }
+.comp-card b { font-size: 18px; }
+.comp-card span { font-size: 12px; opacity: 0.85; }
+.comp-card span.mine { color: #ffd23a; opacity: 1; }
+.comp-desc { font-size: 15px; line-height: 1.4; }
+#lodge-detail .race-board { margin: 8px 0 0; }
+.lodge-foot { display: flex; gap: 12px; align-items: center; justify-content: flex-end; flex-wrap: wrap; margin-top: auto; }
+#lodge-help { margin-right: auto; font-size: 13px; opacity: 0.85; }
+@media (max-width: 600px) { #lodge-panel { inset: 2%; padding: 12px; } #comp-hud, #lodge-hint { white-space: normal; width: 92%; } }
