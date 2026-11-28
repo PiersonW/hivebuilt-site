@@ -1134,6 +1134,8 @@ function tick(dt, now) {
   ach.update(dt);
   if (cashToastT > 0) { cashToastT -= dt; if (cashToastT <= 0) cashToastEl.classList.add('hidden'); }
   heli.update(dt);
+  // move the chairs first, so you (and the camera) sit on where the chair is this frame, not where it was last frame
+  for (const l of lifts) l.update(dt);
   if (inp.padTaps.size) kickMusic();
   if (inp.taps.has('KeyN')) toggleMusic();
   if (inp.taps.has('KeyB')) toggleSfx();
@@ -1298,7 +1300,6 @@ function tick(dt, now) {
     trailMap.draw(rider.pos);
   }
 
-  for (const l of lifts) l.update(dt);
   if (!(game.mode === 'run' && game.paused)) npcs.update(dt, camera.position, rider.pos);
 
   // wide view of the resort from the lift, normal fog while riding
