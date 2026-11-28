@@ -582,9 +582,12 @@ export class Terrain {
     const P = this.pipe;
     if (P) {
       const dx = x - P.ox, dz = z - P.oz, u = dx * P.ax + dz * P.az;
-      if (u > -2 && u < P.L + 2) {
-        const l = dx * P.cx + dz * P.cz;
-        if (Math.abs(l) < PIPE.outer) h += 0.04 + this._pipeProfile(Math.abs(l)) * this._pipeTaper(u);
+      if (u > -8 && u < P.L + 8) {
+        const l = dx * P.cx + dz * P.cz, al = Math.abs(l);
+        // the pipe's packed snow sits 4 cm proud of the slope: ease into that over a few metres at the
+        // entrance, the exit and the outside edges (a sudden 4 cm step was a tiny kicker that tripped people)
+        if (al < PIPE.outer) h += 0.04 * smoothstep(-8, -2, u) * (1 - smoothstep(P.L + 2, P.L + 8, u)) * (1 - smoothstep(PIPE.outer - 3, PIPE.outer, al))
+          + this._pipeProfile(al) * this._pipeTaper(u);
       }
     }
     for (const b of this.snowRocks || []) {
@@ -665,7 +668,7 @@ export class Terrain {
     return Math.max(0, H - x / 1.5);
   }
 
-  _pipeTaper(u) { return smoothstep(-2, 14, u) * (1 - smoothstep(this.pipe.L - 12, this.pipe.L + 2, u)); }
+  _pipeTaper(u) { return smoothstep(-2, 22, u) * (1 - smoothstep(this.pipe.L - 12, this.pipe.L + 2, u)); }   // walls grow in gently at the entrance
 
   // In the halfpipe? -> { l (across, + = right wall), u (along), cx, cz (across unit), onWall } or null
   pipeAt(x, z) {
