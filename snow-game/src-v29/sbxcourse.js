@@ -78,7 +78,8 @@ export class SbxCourse {
     this.feat = feat;
     // berms: how big the bank is at each point (outside of the turn), smoothed in and out
     const bank = new Float32Array(n);
-    for (let i = 0; i < n; i++) bank[i] = Math.min(1, Math.abs(this.kap[i]) / 0.025) * 3.6;
+    // signed (+ = left turn, raise the right side), so it fades through zero smoothly between turns
+    for (let i = 0; i < n; i++) bank[i] = Math.max(-1, Math.min(1, this.kap[i] / 0.025)) * 3.6;
     this.bank = blur(blur(bank, 20), 20);
     this._buildRaster();
   }
@@ -106,10 +107,23 @@ export class SbxCourse {
   coords(x, z) {
     const G = this.grid, b = Math.floor((x - G.x0) / G.C + 0.5), a = Math.floor((z - G.z0) / G.C + 0.5);
     if (b < 0 || a < 0 || b >= G.W || a >= G.H) return null;
-    const i = G.best[a * G.W + b];
+    let i = G.best[a * G.W + b];
     if (i < 0) return null;
-    const dx = x - this.px[i], dz = z - this.pz[i];
-    return { s: i * SBX.ds + dx * this.tx[i] + dz * this.tz[i], l: -dx * this.tz[i] + dz * this.tx[i], i };
+    // find the two neighbouring samples whose cross-lines bracket the point, and blend between them, so
+    // (s, l) slides smoothly along the curve instead of snapping from sample to sample (that made little steps)
+    const f = (k) => (x - this.px[k]) * this.tx[k] + (z - this.pz[k]) * this.tz[k];
+    const n = this.n;
+    for (let it = 0; it < 12; it++) {
+      if (f(i) < 0 && i > 0) i--;
+      else if (i < n - 1 && f(i + 1) >= 0) i++;
+      else break;
+    }
+    const j = Math.min(n - 1, i + 1), fi = f(i), fj = f(j);
+    const t = j === i || fi < 0 || fj >= 0 ? 0 : fi / (fi - fj);
+    const li = -(x - this.px[i]) * this.tz[i] + (z - this.pz[i]) * this.tx[i];
+    const lj = -(x - this.px[j]) * this.tz[j] + (z - this.pz[j]) * this.tx[j];
+    const s = j === i || fi < 0 || fj >= 0 ? i * SBX.ds + fi : (i + t) * SBX.ds;
+    return { s, l: li + (lj - li) * t, i };
   }
   _at(arr, s) { const f = Math.max(0, Math.min(this.n - 1.001, s / SBX.ds)), i = Math.floor(f); return arr[i] + (arr[i + 1] - arr[i]) * (f - i); }
   point(s, l = 0) {
@@ -122,10 +136,11 @@ export class SbxCourse {
   surface(s, l) {
     const hw = SBX.hw, kap = this._at(this.kap, s);
     let h = this._at(this.base, s) + this._at(this.feat, s) + this._at(this.tilt, s) * l;
-    const out = l * Math.sign(kap || 1);             // + = outside of the turn (l is + to the right)
-    h += this._at(this.bank, s) * smoothstep(-0.3 * hw, hw + 1, out) ** 1.5;
+    const b = this._at(this.bank, s), B = Math.abs(b);
+    const out = l * Math.sign(b || 1);               // + = outside of the turn (l is + to the right); B is 0 where it flips
+    h += B * smoothstep(-0.3 * hw, hw + 1, out) ** 1.5;
     h += 0.5 * smoothstep(hw - 1.6, hw + 0.6, Math.abs(l));     // a soft lip along both edges keeps you on course
-    h += 1.2 * Math.min(1, this._at(this.bank, s) / 2) * smoothstep(hw - 1, hw + 1.5, out);   // and a taller wall on the outside of each turn
+    h += 1.2 * Math.min(1, B / 2) * smoothstep(hw - 1, hw + 1.5, out);   // and a taller wall on the outside of each turn
     return h;
   }
   // { s, l, h, k } where the course shapes the snow (k = 1 on the course, fading to 0 at the blend edge)
