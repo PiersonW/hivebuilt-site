@@ -111,7 +111,7 @@ export function buildSkis(mats) {
 // helmet strap, goggles (frame + mirrored lens, centred on the head), neck gaiter, jacket collar and zip
 export function dressRider(r, mats) {
   const strap = new THREE.Mesh(new THREE.TorusGeometry(0.162, 0.014, 6, 28), mats.accent);
-  strap.rotation.x = Math.PI / 2 - 0.15; strap.position.y = 0.025; r.helmet.add(strap);
+  strap.rotation.x = Math.PI / 2 - 0.15; strap.position.y = 0.025; r.helmet.add(strap); r.helmetStrap = strap;
   const frameG = new THREE.CylinderGeometry(0.172, 0.172, 0.075, 18, 1, true, -1.05, 2.1); frameG.translate(0, 0, -0.13);
   const lensG = new THREE.CylinderGeometry(0.176, 0.176, 0.058, 18, 1, true, -0.92, 1.84); lensG.translate(0, 0, -0.13);
   r.goggles.geometry = frameG; r.goggles.material = new THREE.MeshStandardMaterial({ color: 0x1a1c22, roughness: 0.5, side: THREE.DoubleSide });

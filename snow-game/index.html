@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <title>Snow Game – Prototype</title>
 <meta name="robots" content="noindex">
-<link rel="stylesheet" href="style.css?v=35">
+<link rel="stylesheet" href="style.css?v=36">
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
@@ -46,6 +46,8 @@
     <button id="btn-board" class="opt">🏂 Snowboarder</button>
     <button id="btn-ski" class="opt">⛷️ Skier</button>
   </div>
+  <div class="stance char-row"><span>Character</span><div id="char-picks"></div></div>
+  <div id="char-note" class="muted"></div>
   <div class="stance" id="stance-row">
     <span>Stance</span>
     <button id="btn-regular" class="opt">Regular</button>
@@ -66,7 +68,7 @@
     <button id="btn-sfx" class="opt small toggle on">🔊 Sounds</button>
     <button id="btn-fullscreen" class="opt small">Full screen</button>
   </div>
-  <p class="hint">Keyboard: ↑/↓ snowboarder or skier · ←/→ stance · Enter to start · F ride with friends · L lodge &amp; competitions · T achievements · N music · B sounds<br>Xbox: D-pad up/down rider · left/right stance · A to start · RB ride with friends · X lodge · Y achievements · right stick scrolls this page</p>
+  <p class="hint">Keyboard: ↑/↓ snowboarder or skier · ←/→ stance · C character · Enter to start · F ride with friends · L lodge &amp; competitions · T achievements · N music · B sounds<br>Xbox: D-pad up/down rider · left/right stance · LB character · A to start · RB ride with friends · X lodge · Y achievements · right stick scrolls this page</p>
   <p class="hint touch-hint">📱 Turn your phone sideways to ride. Left thumb anywhere on the left: steer (push up to push along, pull down to tuck; in the air it spins and flips). Right thumb: <b>Jump</b> (hold to jump higher), <b>Grab</b> (in the air; on the snow it shoves whoever's beside you), <b>Grind</b> (hold near a rail), <b>Brake</b>. ☰ is the menu.</p>
   <div id="menu-controls"></div>
   <p class="credits">Art: chairlift chair and tower by Poly by Google (CC-BY 3.0, via Poly Pizza) · trees by Quaternius (CC0) · sky and textures from Poly Haven (CC0)</p>
@@ -127,6 +129,6 @@
   <div class="muted">Drag or right stick to orbit</div>
 </div>
 
-<script type="module" src="src-v35/main.js"></script>
+<script type="module" src="src-v36/main.js"></script>
 </body>
 </html>

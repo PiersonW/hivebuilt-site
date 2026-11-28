@@ -241,3 +241,16 @@ body.touch .touch-hint { display: block; }
 .code-input { font: bold 40px Trebuchet MS, sans-serif; letter-spacing: 10px; text-transform: uppercase; text-align: center; width: 220px; padding: 8px; border-radius: 10px; border: 2px solid #ffd23a; background: rgba(0,0,0,0.3); color: #fff; margin: 10px auto; display: block; }
 @media (max-height: 500px) { .screen h1 { font-size: 34px; margin: 4px 0; } .screen .sub { margin: 0 0 6px; } .stance { margin: 4px 0; } .screen .big { padding: 8px 22px; } }
 body.touch #lift-top kbd { display: none; }
+/* character picker */
+.char-row { align-items: flex-start; }
+#char-picks { display: flex; flex-wrap: wrap; gap: 6px; max-width: 560px; }
+.char-pick { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 62px; padding: 6px 6px 5px; border-radius: 10px; border: 2px solid rgba(255,255,255,0.35); background: rgba(255,255,255,0.08); color: #fff; font: bold 12px Trebuchet MS, sans-serif; cursor: pointer; }
+.char-pick.on { border-color: #ffd23a; background: rgba(255, 210, 58, 0.22); }
+.char-pick:disabled { opacity: 0.4; cursor: not-allowed; }
+.char-pick small { font-weight: normal; font-size: 10px; opacity: 0.9; }
+.char-sw { position: relative; width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.7); }
+.char-sw i { position: absolute; left: 5px; top: -6px; width: 12px; height: 9px; border-radius: 7px 7px 2px 2px; border: 1px solid rgba(0,0,0,0.3); }
+.char-sw i.beanie::after { content: ''; position: absolute; left: 3px; top: -5px; width: 5px; height: 5px; border-radius: 50%; background: #f4f4f4; }
+#char-note { min-height: 0; margin: 2px 0 4px; color: #ffd23a; }
+@media (max-height: 500px) { .char-pick { min-width: 52px; padding: 4px; font-size: 11px; } }
+.char-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(255,255,255,0.7); }

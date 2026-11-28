@@ -36,12 +36,12 @@ export class Net {
     await this.leave();
     if (!sharedClient) sharedClient = createClient(URL, KEY, { realtime: { params: { eventsPerSecond: 40 } } });
     this.client = sharedClient;
-    this.code = code; this.status = 'connecting'; this.me = { id: this.id, name: me.name, joinedAt: Date.now() };
+    this.code = code; this.status = 'connecting'; this.me = { id: this.id, name: me.name, char: me.char, joinedAt: Date.now() };
     const ch = this.client.channel(`snowgame:${kind}:${code}`, { config: { broadcast: { self: false }, presence: { key: this.id } } });
     this.channel = ch;
     ch.on('presence', { event: 'sync' }, () => {
       const st = ch.presenceState(), list = [];
-      for (const id of Object.keys(st)) { const p = st[id][0]; if (p) list.push({ id, name: p.name, joinedAt: p.joinedAt }); }
+      for (const id of Object.keys(st)) { const p = st[id][0]; if (p) list.push({ id, name: p.name, joinedAt: p.joinedAt, char: p.char }); }
       list.sort((a, b) => a.joinedAt - b.joinedAt || (a.id < b.id ? -1 : 1));
       this.players = list;
       if (this.onPlayers) this.onPlayers(list);
@@ -56,6 +56,9 @@ export class Net {
       });
     });
   }
+
+  // change what the others see of you (e.g. your character), keeping your place in the join order
+  update(fields) { if (!this.me) return; Object.assign(this.me, fields); if (this.channel && this.connected) this.channel.track(this.me); }
 
   send(event, payload) { if (this.channel && this.connected) this.channel.send({ type: 'broadcast', event, payload }); }
 

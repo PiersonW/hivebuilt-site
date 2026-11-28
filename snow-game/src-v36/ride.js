@@ -4,12 +4,12 @@
 // with their name floating above their head.
 import * as THREE from 'three';
 import { Rider } from './rider.js';
+import { applyLook, charOf, cssColor } from './characters.js';
 
 const SEND_HZ = 12, DELAY = 0.18;
 const TAG_TIME = 180, TAG_RANGE = 2.3, NO_TAGBACK = 3;   // a 3-minute round; touch within 2.3 m; no tag-backs for 3 s
 const ON_SNOW = new Set(['ride', 'air', 'grind', 'crash']);
 const STATES = ['ride', 'air', 'crash', 'grind', 'lift', 'fly', 'heli'];
-const PAL = [[0xffd23a, 0x23324d, 0xd63030], [0x15b3c4, 0x1d2a44, 0xffffff], [0x8bd94b, 0x2b2b2b, 0x7b4fd6], [0xe0457b, 0x23324d, 0xffd23a], [0xf2f2f2, 0x2b2b2b, 0x2fbf71], [0x7b4fd6, 0x1d2a44, 0xff7a1a]];
 
 export class RideTogether {
   constructor(scene, terrain, net) {
@@ -33,7 +33,7 @@ export class RideTogether {
         const others = list.filter(p => p.id !== this.tag.it);
         this._setIt(others[Math.floor(Math.random() * others.length)].id, null, this.tag.s + 1, true);
       }
-      for (const p of list) { const f = this.friends.get(p.id); if (f && f.name !== p.name) this._setName(f, p.name); }
+      for (const p of list) { const f = this.friends.get(p.id); if (f) this._dress(f, p.char, p.name); }
       if (this.onChange) this.onChange(list);
     };
   }
@@ -43,16 +43,20 @@ export class RideTogether {
   _friend(id, name) {
     let f = this.friends.get(id);
     if (!f) {
-      const k = this.friends.size % PAL.length, r = new Rider(this.scene, this.T); r.npc = true;
-      const [jacket, pants, helmet] = PAL[k];
-      r.mats.jacket.color.setHex(jacket); r.mats.pants.color.setHex(pants); r.mats.helmet.color.setHex(helmet);
-      r.mats.board.color.setHex(helmet); r.mats.boardTop.color.setHex(helmet).lerp(new THREE.Color(1, 1, 1), 0.55);
+      const r = new Rider(this.scene, this.T); r.npc = true;
       r.root.visible = false;
-      f = { id, name: '', rider: r, snaps: [], color: '#' + jacket.toString(16).padStart(6, '0') };
-      this._setName(f, name || 'Friend');
+      f = { id, name: '', rider: r, snaps: [], color: '#fff' };
       this.friends.set(id, f);
+      const p = this.net.players.find(q => q.id === id);
+      this._dress(f, p && p.char, name || 'Friend');
     }
     return f;
+  }
+  // wear the character they picked (their name tag dot is their jacket colour)
+  _dress(f, charId, name) {
+    const c = charOf(charId), col = cssColor(c.jacket);
+    applyLook(f.rider, c.id);
+    if (col !== f.color || name !== f.name || !f.tag) { f.color = col; this._setName(f, name); }
   }
   // a name tag that always faces the camera, floating over their helmet
   _setName(f, name) {

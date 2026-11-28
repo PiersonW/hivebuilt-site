@@ -26,6 +26,7 @@ import { Net, newCode, LETTERS, MAX_PLAYERS } from './net.js';
 import { RideTogether } from './ride.js';
 import { Sfx } from './sfx.js';
 import { IS_TOUCH, TouchControls } from './touch.js';
+import { CHARACTERS, applyLook, freeCharacter, charOf, cssColor } from './characters.js';
 import { Comps, COMPS, COMP_BY_ID, PRIZES, FINISH_PRIZE, ACH_PRIZE, fmtValue, ordinal, money } from './comps.js';
 
 // ---------- renderer / scene ----------
@@ -226,6 +227,57 @@ function setStance(regular) {
   document.getElementById('btn-goofy').classList.toggle('on', !regular);
   rider.setStance(regular);
 }
+// ---------- characters ----------
+// Everyone in a room (or race) wears a different one: whoever joined first keeps theirs.
+const charPicksEl = document.getElementById('char-picks'), charNoteEl = document.getElementById('char-note');
+let charNote = '';
+const othersIn = (N) => N.code ? N.players.filter(p => p.id !== N.id) : [];
+function takenChars() {
+  const m = new Map();
+  for (const N of [rideNet, net]) for (const p of othersIn(N)) if (p.char) m.set(p.char, p.name);
+  return m;
+}
+function setChar(id, save = true) {
+  game.char = charOf(id).id;
+  applyLook(rider, game.char);
+  if (save) { try { localStorage.setItem('snowChar', game.char); } catch {} charNote = ''; }
+  for (const N of [rideNet, net]) if (N.code) N.update({ char: game.char });
+  renderCharPicks();
+}
+const charTag = (id) => { const c = charOf(id); return `<span class="char-dot" style="background:${cssColor(c.jacket)}"></span><b>${c.name}</b> · `; };
+function renderCharPicks() {
+  const taken = takenChars();
+  charPicksEl.innerHTML = CHARACTERS.map(c => {
+    const by = taken.get(c.id);
+    return `<button class="char-pick ${c.id === game.char ? 'on' : ''}" data-id="${c.id}" ${by ? 'disabled' : ''} title="${by ? `${escapeHtml(by)} is ${c.name}` : c.name}">` +
+      `<span class="char-sw" style="background:${cssColor(c.jacket)}"><i style="background:${cssColor(c.hatColor)}" class="${c.hat}"></i></span>${c.name}${by ? `<small>${escapeHtml(by)}</small>` : ''}</button>`;
+  }).join('');
+  charPicksEl.querySelectorAll('.char-pick').forEach(b => b.onclick = () => { if (!b.disabled) setChar(b.dataset.id); });
+  charNoteEl.innerHTML = charNote;
+}
+function cycleChar() {
+  const taken = takenChars(), i = CHARACTERS.findIndex(c => c.id === game.char);
+  for (let k = 1; k <= CHARACTERS.length; k++) { const c = CHARACTERS[(i + k) % CHARACTERS.length]; if (!taken.has(c.id)) { setChar(c.id); return; } }
+}
+// someone who joined the room before you already has your character: switch to a free one
+function resolveChar(N) {
+  if (!N.code) return;
+  const list = N.players, me = list.findIndex(p => p.id === N.id);
+  if (me < 0) return;
+  const clash = list.slice(0, me).find(p => p.char === game.char);
+  if (clash) {
+    const nc = freeCharacter(game.char, new Set(list.filter(p => p.id !== N.id).map(p => p.char)));
+    if (nc !== game.char) {
+      charNote = `${escapeHtml(clash.name)} is already ${charOf(game.char).name}, so you're ${charOf(nc).name} in this room.`;
+      setChar(nc, false);
+      if (game.mode === 'run') hud.popup(`${escapeHtml(clash.name)} is ${charOf(clash.char).name}: you're ${charOf(nc).name}`, 0);
+      return;
+    }
+  }
+  renderCharPicks();
+}
+setChar((() => { try { return localStorage.getItem('snowChar') || 'blaze'; } catch { return 'blaze'; } })(), false);
+
 // snowboarder or skier
 function setSport(sport) {
   game.sport = sport;
@@ -431,7 +483,7 @@ function updateJumpHud() {
   } else if (race.state !== 'running') raceHudEl.classList.add('hidden');
 }
 
-const escapeHtml = (t) => String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+function escapeHtml(t) { return String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])); }
 // ---------- competitions (sign up at the Base Lodge) ----------
 const compHudEl = document.getElementById('comp-hud');
 const balanceEl = document.getElementById('balance'), balDot = document.getElementById('bal-dot');
@@ -464,7 +516,7 @@ function enterComp(id, plan = null) {
   game.holdJump = true;
   comp = { id, state: 'ready', score: 0, stillT: 0, offT: 0 };
   if (id === 'sbx') {
-    const lane = sbx.start({ rider, name: racerName() }, 5, plan ? { net, plan, host: net.isHost } : null);
+    const lane = sbx.start({ rider, name: racerName(), char: game.char }, 5, plan ? { net, plan, host: net.isHost } : null);
     comp.online = !!plan;
     rider.reset(lane.pos.clone(), lane.yaw); rider.vel.set(0, 0, 0); chase.snap(rider);
   }
@@ -643,14 +695,14 @@ const onlineEl = document.getElementById('online-panel'), onlineBody = document.
 const online = { view: 'off', code: ['A', 'A', 'A', 'A'], cur: 0, msg: '', kind: 'sbx' };
 const rideBadge = document.getElementById('ride-badge');
 const curNet = () => online.kind === 'ride' ? rideNet : net;
-ride.onChange = () => { if (game.mode === 'online' && online.kind === 'ride') renderOnline(); updateFriendsBtn(); };
+ride.onChange = () => { resolveChar(rideNet); if (game.mode === 'online' && online.kind === 'ride') renderOnline(); updateFriendsBtn(); };
 function updateFriendsBtn() { document.getElementById('btn-friends').textContent = ride.active ? `👥 Friends · room ${rideNet.code} · ${ride.count} rider${ride.count === 1 ? '' : 's'}` : '👥 Ride with friends'; }
 function openFriends() { online.kind = 'ride'; openOnline(ride.active ? 'lobby' : 'choose'); }
 net.on = (event, payload) => {
   if (event === 'start') { if (game.mode === 'online') startOnlineRace(payload); }
   else sbx.receive(event, payload);
 };
-net.onPlayers = (list) => { sbx.playersChanged(list); if (game.mode === 'online') renderOnline(); };
+net.onPlayers = (list) => { resolveChar(net); sbx.playersChanged(list); if (game.mode === 'online') renderOnline(); };
 
 function openOnline(view) {
   game.mode = 'online'; online.view = view; online.msg = '';
@@ -663,7 +715,7 @@ async function connectTo(code) {
   online.view = 'connecting'; online.code = code.split(''); renderOnline();
   try {
     const N = curNet();
-    await N.join(code, { name: racerName() }, online.kind);
+    await N.join(code, { name: racerName(), char: game.char }, online.kind);
     // wait a moment for the room list, then make sure there's space
     await new Promise(r => setTimeout(r, 700));
     if (N.players.length > MAX_PLAYERS && !N.players.slice(0, MAX_PLAYERS).some(p => p.id === N.id)) { await N.leave(); online.view = 'code'; online.msg = `Room ${code} is full (6 riders).`; }
@@ -716,7 +768,7 @@ function renderOnline() {
     const list = N.players.slice(0, MAX_PLAYERS);
     onlineBody.innerHTML = `<div class="comp-desc">Room code (tell your friends):</div><div class="room-code">${N.code.split('').map(ch => `<span>${ch}</span>`).join('')}</div>` +
       `<div class="panel-title">Riders in the room (${list.length} / ${MAX_PLAYERS})</div><div class="online-players">` +
-      list.map(p => `<div class="${p.id === N.id ? 'me' : ''}">${escapeHtml(p.name)}${p.id === N.id ? ' (you)' : ''}</div>`).join('') + '</div>' +
+      list.map(p => `<div class="${p.id === N.id ? 'me' : ''}">${charTag(p.id === N.id ? game.char : p.char)}${escapeHtml(p.name)}${p.id === N.id ? ' (you)' : ''}</div>`).join('') + '</div>' +
       `<div class="muted">Go ride: helicopter, summit, lifts or competitions. You'll see each other with name tags (and on the lift's trail map). You stay in the room until you leave it. ${usePad ? 'X' : 'A / S / D / F'} (a grab button) on the snow shoves whoever's beside you.</div>` +
       `<div class="tag-box"><b>🏷️ Tag</b> · 3-minute rounds. Whoever is IT rides into someone to tag them (no tag-backs for 3 s). Least time as IT wins. Chairlifts and the helicopter are safe.<br>` +
       (ride.tagOn ? `<span class="pr">A round is on: ${escapeHtml(ride._nameOf(ride.tag.it))} is IT · ${fmtSecs(ride.tag.left)} left</span>` : list.length < 2 ? '<span class="muted">Needs at least 2 riders in the room.</span>' : `<button id="btn-tag" class="opt">🏷️ Start a round of tag ${usePad ? '(Y)' : '(G)'}</button>`) + '</div>';
@@ -745,7 +797,7 @@ function renderOnline() {
     const host = net.isHost, list = net.players.slice(0, MAX_PLAYERS);
     onlineBody.innerHTML = `<div class="comp-desc">Room code (tell your friends):</div><div class="room-code">${net.code.split('').map(ch => `<span>${ch}</span>`).join('')}</div>` +
       `<div class="panel-title">Riders in the room (${list.length} / ${MAX_PLAYERS})</div><div class="online-players">` +
-      list.map((p, i) => `<div class="${p.id === net.id ? 'me' : ''}">${i === 0 ? '⭐ ' : ''}${escapeHtml(p.name)}${p.id === net.id ? ' (you)' : ''}</div>`).join('') + '</div>' +
+      list.map((p, i) => `<div class="${p.id === net.id ? 'me' : ''}">${i === 0 ? '⭐ ' : ''}${charTag(p.id === net.id ? game.char : p.char)}${escapeHtml(p.name)}${p.id === net.id ? ' (you)' : ''}</div>`).join('') + '</div>' +
       `<div class="muted">${host ? `You're the host: start when everyone's in. ${MAX_PLAYERS - list.length} bot${MAX_PLAYERS - list.length === 1 ? '' : 's'} will fill the empty gates.` : 'Waiting for the host (⭐) to start the race…'}</div>`;
     go.textContent = 'Start race'; go.classList.toggle('hidden', !host);
     help.innerHTML = usePad ? `🎮 ${host ? '<b>A</b> start · ' : ''}<b>B</b> leave the room` : `${host ? '<b>Enter</b> start · ' : ''}<b>Esc</b> leave the room`;
@@ -759,7 +811,7 @@ function startOnlineRace(plan) {
 function hostStart() {
   if (!net.isHost) return;
   const list = net.players.slice(0, MAX_PLAYERS), lanes = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
-  const plan = { players: list.map((p, i) => ({ id: p.id, name: p.name, lane: lanes[i] })), bots: SbxRace.botPlan(MAX_PLAYERS - list.length, lanes.slice(list.length)) };
+  const plan = { players: list.map((p, i) => ({ id: p.id, name: p.name, lane: lanes[i], char: p.id === net.id ? game.char : p.char })), bots: SbxRace.botPlan(MAX_PLAYERS - list.length, lanes.slice(list.length), list.map(p => p.id === net.id ? game.char : p.char)) };
   net.send('start', plan);
   startOnlineRace(plan);
 }
@@ -1424,6 +1476,7 @@ function tick(dt, now) {
     if (inp.rightPressed && game.sport === 'board') setStance(false);
     if (inp.upPressed) setSport('board');
     if (inp.downPressed) setSport('ski');
+    if (inp.taps.has('KeyC') || inp.padTaps.has(BTN.LB)) cycleChar();
     if (inp.confirmPressed) startHeli();
     else if (inp.taps.has('KeyL') || inp.padTaps.has(BTN.X)) openLodge();
     else if (inp.taps.has('KeyF') || inp.padTaps.has(BTN.RB)) openFriends();

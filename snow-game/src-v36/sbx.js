@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { Rider } from './rider.js';
 import { SBX } from './sbxcourse.js';
+import { applyLook, CHARACTERS } from './characters.js';
 
 const BOT_NAMES = ['Maya L.', 'Kai M.', 'Theo P.', 'Leo S.', 'Finn D.', 'Nora K.', 'Ava C.', 'Jonas B.'];
 const COLORS = [[0x2fbf71, 0x1d2a44, 0xffd23a], [0xd63030, 0x23324d, 0x1e8fd6], [0x7b4fd6, 0x2b2b2b, 0xff7a1a], [0x1e8fd6, 0x3a2a1a, 0xf2f2f2], [0xff7aa8, 0x1d2a44, 0x2fbf71]];
@@ -45,15 +46,15 @@ export class SbxRace {
     let plan = online && online.plan;
     if (!plan) {
       const lanes = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
-      plan = { players: [{ id: 'me', name: you.name, lane: lanes[0] }], bots: SbxRace.botPlan(nBots, lanes.slice(1)) };
+      plan = { players: [{ id: 'me', name: you.name, lane: lanes[0], char: you.char }], bots: SbxRace.botPlan(nBots, lanes.slice(1), [you.char]) };
     }
     const myId = this.net ? this.net.id : 'me';
     for (const p of plan.players) {
       if (p.id === myId) this.slots.unshift({ id: p.id, kind: 'you', name: you.name, rider: you.rider, lane: p.lane });
-      else this.slots.push({ id: p.id, kind: 'remote', name: p.name, rider: this._remoteRider(p.lane), lane: p.lane, snaps: [] });
+      else { const r = this._remoteRider(p.lane); applyLook(r, p.char); this.slots.push({ id: p.id, kind: 'remote', name: p.name, rider: r, lane: p.lane, snaps: [] }); }
     }
     for (const b of plan.bots) {
-      const r = this._bot(b.k);
+      const r = this._bot(b.k); applyLook(r, b.char || CHARACTERS[(b.k + 1) % CHARACTERS.length].id);
       // the host runs the bots; everyone else just draws them
       if (this.host) this.slots.push({ id: b.id, kind: 'bot', name: b.name, rider: r, lane: b.lane, skill: b.skill, wobble: b.k * 1.7, line: b.line, aggro: b.aggro });
       else this.slots.push({ id: b.id, kind: 'remote', bot: true, name: b.name, rider: r, lane: b.lane, snaps: [] });
@@ -71,9 +72,11 @@ export class SbxRace {
   }
 
   // bots for the empty gates: a spread of skill so there's always someone to beat and someone to chase
-  static botPlan(n, lanes) {
+  // (each bot wears a character none of the players has)
+  static botPlan(n, lanes, usedChars = []) {
     const names = [...BOT_NAMES].sort(() => Math.random() - 0.5), skills = [0.86, 0.9, 0.93, 0.96, 0.985].sort(() => Math.random() - 0.5);
-    return Array.from({ length: n }, (_, k) => ({ id: 'bot' + k, name: names[k], lane: lanes[k], k, skill: skills[k % 5], line: (Math.random() - 0.5) * 4, aggro: 0.6 + Math.random() * 1.6 }));
+    const free = CHARACTERS.map(c => c.id).filter(id => !usedChars.includes(id)).sort(() => Math.random() - 0.5);
+    return Array.from({ length: n }, (_, k) => ({ id: 'bot' + k, name: names[k], lane: lanes[k], k, skill: skills[k % 5], line: (Math.random() - 0.5) * 4, aggro: 0.6 + Math.random() * 1.6, char: free[k % free.length] }));
   }
 
   // a rider for a friend online, coloured by their gate (bots keep their own look)
