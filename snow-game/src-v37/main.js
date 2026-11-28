@@ -27,6 +27,8 @@ import { RideTogether } from './ride.js';
 import { Sfx } from './sfx.js';
 import { IS_TOUCH, TouchControls } from './touch.js';
 import { CHARACTERS, applyLook, freeCharacter, charOf, cssColor } from './characters.js';
+import { Lobby } from './lobby.js';
+import { MenuNav } from './menunav.js';
 import { Comps, COMPS, COMP_BY_ID, PRIZES, FINISH_PRIZE, ACH_PRIZE, fmtValue, ordinal, money } from './comps.js';
 
 // ---------- renderer / scene ----------
@@ -223,13 +225,13 @@ window.__game = { ride, rideNet, net, sbx, sfx, treeLod, comps, enterComp: (id) 
 
 function setStance(regular) {
   game.regular = regular;
-  document.getElementById('btn-regular').classList.toggle('on', regular);
-  document.getElementById('btn-goofy').classList.toggle('on', !regular);
+  document.getElementById('val-stance').innerHTML = regular ? 'Regular<small>left foot forward</small>' : 'Goofy<small>right foot forward</small>';
   rider.setStance(regular);
+  for (const N of [rideNet, net]) if (N.code) N.update({ regular });
 }
 // ---------- characters ----------
 // Everyone in a room (or race) wears a different one: whoever joined first keeps theirs.
-const charPicksEl = document.getElementById('char-picks'), charNoteEl = document.getElementById('char-note');
+const charValEl = document.getElementById('val-char'), charNoteEl = document.getElementById('char-note');
 let charNote = '';
 const othersIn = (N) => N.code ? N.players.filter(p => p.id !== N.id) : [];
 function takenChars() {
@@ -246,18 +248,14 @@ function setChar(id, save = true) {
 }
 const charTag = (id) => { const c = charOf(id); return `<span class="char-dot" style="background:${cssColor(c.jacket)}"></span><b>${c.name}</b> · `; };
 function renderCharPicks() {
-  const taken = takenChars();
-  charPicksEl.innerHTML = CHARACTERS.map(c => {
-    const by = taken.get(c.id);
-    return `<button class="char-pick ${c.id === game.char ? 'on' : ''}" data-id="${c.id}" ${by ? 'disabled' : ''} title="${by ? `${escapeHtml(by)} is ${c.name}` : c.name}">` +
-      `<span class="char-sw" style="background:${cssColor(c.jacket)}"><i style="background:${cssColor(c.hatColor)}" class="${c.hat}"></i></span>${c.name}${by ? `<small>${escapeHtml(by)}</small>` : ''}</button>`;
-  }).join('');
-  charPicksEl.querySelectorAll('.char-pick').forEach(b => b.onclick = () => { if (!b.disabled) setChar(b.dataset.id); });
+  const c = charOf(game.char), i = CHARACTERS.indexOf(c), taken = takenChars();
+  charValEl.innerHTML = `<span class="char-dot" style="background:${cssColor(c.jacket)}"></span>${c.name} <small>${i + 1} / ${CHARACTERS.length}${taken.size ? ` · ${taken.size} taken by friends` : ''}</small>`;
   charNoteEl.innerHTML = charNote;
 }
-function cycleChar() {
-  const taken = takenChars(), i = CHARACTERS.findIndex(c => c.id === game.char);
-  for (let k = 1; k <= CHARACTERS.length; k++) { const c = CHARACTERS[(i + k) % CHARACTERS.length]; if (!taken.has(c.id)) { setChar(c.id); return; } }
+// next / previous character nobody else in your room has
+function cycleChar(dir = 1) {
+  const taken = takenChars(), n = CHARACTERS.length, i = CHARACTERS.findIndex(c => c.id === game.char);
+  for (let k = 1; k <= n; k++) { const c = CHARACTERS[((i + dir * k) % n + n) % n]; if (!taken.has(c.id)) { setChar(c.id); return; } }
 }
 // someone who joined the room before you already has your character: switch to a free one
 function resolveChar(N) {
@@ -281,16 +279,23 @@ setChar((() => { try { return localStorage.getItem('snowChar') || 'blaze'; } cat
 // snowboarder or skier
 function setSport(sport) {
   game.sport = sport;
-  document.getElementById('btn-board').classList.toggle('on', sport === 'board');
-  document.getElementById('btn-ski').classList.toggle('on', sport === 'ski');
+  document.getElementById('val-sport').textContent = sport === 'ski' ? '⛷️ Skis' : '🏂 Snowboard';
   document.getElementById('stance-row').classList.toggle('disabled', sport === 'ski');
   rider.setSport(sport);
+  for (const N of [rideNet, net]) if (N.code) N.update({ sport });
   try { localStorage.setItem('snowSport', sport); } catch {}
 }
 setStance(true);
 setSport((() => { try { return localStorage.getItem('snowSport') || 'board'; } catch { return 'board'; } })());
-document.getElementById('btn-board').onclick = () => setSport('board');
-document.getElementById('btn-ski').onclick = () => setSport('ski');
+// ◀ ▶ option rows on the menu (controller / arrow keys send a 'change' event; mouse and touch tap the arrows)
+const optRow = (id, fn) => {
+  const row = document.getElementById(id);
+  row.addEventListener('change', (e) => fn(e.detail));
+  row.querySelectorAll('.arr').forEach(b => b.onclick = (e) => { e.stopPropagation(); fn(+b.dataset.d); });
+};
+optRow('opt-char', (d) => cycleChar(d));
+optRow('opt-sport', () => setSport(game.sport === 'ski' ? 'board' : 'ski'));
+optRow('stance-row', () => { if (game.sport !== 'ski') setStance(!game.regular); });
 
 // Start a run at the top (or at `at`, e.g. the lift unload point).
 function startRun(at = null, yaw = 0) {
@@ -696,7 +701,11 @@ const online = { view: 'off', code: ['A', 'A', 'A', 'A'], cur: 0, msg: '', kind:
 const rideBadge = document.getElementById('ride-badge');
 const curNet = () => online.kind === 'ride' ? rideNet : net;
 ride.onChange = () => { resolveChar(rideNet); if (game.mode === 'online' && online.kind === 'ride') renderOnline(); updateFriendsBtn(); };
-function updateFriendsBtn() { document.getElementById('btn-friends').textContent = ride.active ? `👥 Friends · room ${rideNet.code} · ${ride.count} rider${ride.count === 1 ? '' : 's'}` : '👥 Ride with friends'; }
+function updateFriendsBtn() {
+  document.getElementById('friends-label').textContent = ride.active ? `Your party · room ${rideNet.code}` : 'Ride with friends';
+  document.getElementById('friends-sub').textContent = ride.active ? `${ride.count} rider${ride.count === 1 ? '' : 's'} · invite, play tag or leave` : 'Start a party or join one with a code';
+  renderParty();
+}
 function openFriends() { online.kind = 'ride'; openOnline(ride.active ? 'lobby' : 'choose'); }
 net.on = (event, payload) => {
   if (event === 'start') { if (game.mode === 'online') startOnlineRace(payload); }
@@ -715,7 +724,7 @@ async function connectTo(code) {
   online.view = 'connecting'; online.code = code.split(''); renderOnline();
   try {
     const N = curNet();
-    await N.join(code, { name: racerName(), char: game.char }, online.kind);
+    await N.join(code, { name: racerName(), char: game.char, sport: game.sport, regular: game.regular }, online.kind);
     // wait a moment for the room list, then make sure there's space
     await new Promise(r => setTimeout(r, 700));
     if (N.players.length > MAX_PLAYERS && !N.players.slice(0, MAX_PLAYERS).some(p => p.id === N.id)) { await N.leave(); online.view = 'code'; online.msg = `Room ${code} is full (6 riders).`; }
@@ -1319,6 +1328,55 @@ function updateLiftCamera() {
   if (Math.abs(camera.fov - 70) > 0.1) { camera.fov += (70 - camera.fov) * 0.1; camera.updateProjectionMatrix(); }
 }
 
+// ---------- the lobby (menu) ----------
+const lobby = new Lobby(scene, terrain, camera);
+const lobbyNavEl = document.getElementById('lb-nav'), partyEl = document.getElementById('lb-party'), hintsEl = document.getElementById('lb-hints');
+const howtoEl = document.getElementById('howto');
+const menuNav = new MenuNav(lobbyNavEl);
+let howtoOpen = false, partyT = 0;
+function toggleHowto(on) { howtoOpen = on; howtoEl.classList.toggle('hidden', !on); }
+function openLobby() { lobby.show(); menuNav.reset(); renderParty(); renderHints(); }
+const STATUS = { ride: 'Riding', air: 'In the air', crash: 'Wiped out', grind: 'Grinding', lift: 'On a chairlift', fly: 'Flying', heli: 'In the helicopter' };
+// everyone else in your friends room, in the order they joined
+function partyList() {
+  if (!ride.active) return [];
+  return rideNet.players.filter(p => p.id !== rideNet.id).map(p => {
+    const f = ride.friends.get(p.id);
+    const status = !f || f.off || !f.snaps.length ? 'In the lobby' : (STATUS[f.rider.state] || 'Riding');
+    return { id: p.id, name: p.name, char: p.char, sport: p.sport, regular: p.regular, status };
+  });
+}
+const slotHtml = (ch, name, st, me) => { const c = charOf(ch); return `<div class="lb-slot ${me ? 'me' : ''}"><span class="char-dot" style="background:${cssColor(c.jacket)}"></span><b>${escapeHtml(name)}</b>&nbsp;<small>${c.name}</small><em>${st}</em></div>`; };
+function renderParty() {
+  if (!partyEl) return;
+  let h;
+  if (!ride.active) {
+    h = `<div class="lb-party-title">Party</div>${slotHtml(game.char, nameEl.value.trim() || 'You', 'you', true)}` +
+      [1, 2, 3].map(() => `<div class="lb-slot empty">+ Empty</div>`).join('') +
+      `<button class="lb-party-btn" id="party-go">👥 Start or join a party</button><div class="lb-party-note">Friends join from their own computer, phone or Xbox with a 4-letter code. Up to 6.</div>`;
+  } else {
+    const list = rideNet.players.slice(0, MAX_PLAYERS);
+    h = `<div class="lb-party-title">Party <span class="lb-code">${rideNet.code}</span></div>` +
+      list.map(p => {
+        const me = p.id === rideNet.id, f = !me && ride.friends.get(p.id);
+        const st = me ? 'you' : !f || f.off || !f.snaps.length ? 'in the lobby' : (STATUS[f.rider.state] || 'riding').toLowerCase();
+        return slotHtml(me ? game.char : p.char, p.name, st, me);
+      }).join('') +
+      (list.length < MAX_PLAYERS ? `<div class="lb-slot empty">+ Invite friends with code <b>&nbsp;${rideNet.code}</b></div>` : '') +
+      (ride.tagOn ? `<div class="lb-party-note">🏷️ Tag is on · ${escapeHtml(ride._nameOf(ride.tag.it))} is IT</div>` : '') +
+      `<button class="lb-party-btn" id="party-go">Party options (tag, leave)</button>`;
+  }
+  if (partyEl._h !== h) { partyEl.innerHTML = h; partyEl._h = h; const b = document.getElementById('party-go'); if (b) b.onclick = () => openFriends(); }
+}
+// what the buttons do, for whatever you're holding
+function renderHints() {
+  const pad = !!input.padName || IS_XBOX;
+  const h = IS_TOUCH ? '' : pad
+    ? '<span><b>Ⓐ</b> Select</span><span><b>✚ / Left stick</b> Move</span><span><b>◀ ▶</b> Change</span><span><b>LB RB</b> Character</span><span><b>Ⓧ</b> Competitions</span><span><b>Ⓨ</b> Achievements</span>'
+    : '<span><b>↑ ↓</b> Move</span><span><b>Enter</b> Select</span><span><b>← →</b> Change</span><span><b>C</b> Character</span><span><b>F</b> Friends</span><span><b>L</b> Competitions</span><span><b>T</b> Achievements</span>';
+  if (hintsEl._h !== h) { hintsEl.innerHTML = h; hintsEl._h = h; }
+}
+
 function showMenu() {
   if (net.code) leaveOnline(false);
   game.mode = 'menu';
@@ -1334,6 +1392,7 @@ function showMenu() {
   hud.show(false);
   rider.reset(terrain.spawnPoint(), 0);
   chase.snap(rider);
+  openLobby();
 }
 
 // "Main Street → Crossover → Long Haul" (ignores quick crossings under 2 s)
@@ -1349,8 +1408,8 @@ fsBtn.onclick = () => { try { document.documentElement.requestFullscreen(); } ca
 document.addEventListener('fullscreenchange', () => fsBtn.classList.toggle('hidden', !!document.fullscreenElement));
 const padHelpEl = document.getElementById('pad-help');
 
-document.getElementById('btn-regular').onclick = () => setStance(true);
-document.getElementById('btn-goofy').onclick = () => setStance(false);
+document.getElementById('btn-howto').onclick = () => toggleHowto(true);
+document.getElementById('howto-close').onclick = () => toggleHowto(false);
 document.getElementById('btn-start').onclick = () => startHeli();
 document.getElementById('btn-summit').onclick = () => startRun();
 document.getElementById('btn-lodge').onclick = () => openLodge();
@@ -1455,8 +1514,9 @@ function tick(dt, now) {
   // move the chairs first, so you (and the camera) sit on where the chair is this frame, not where it was last frame
   for (const l of lifts) l.update(dt);
   if (inp.padTaps.size) kickMusic();
-  if (inp.taps.has('KeyN')) toggleMusic();
-  if (inp.taps.has('KeyB')) toggleSfx();
+  const typingCode = game.mode === 'online' && online.view === 'code';      // (B and N are letters in a room code)
+  if (inp.taps.has('KeyN') && !typingCode) toggleMusic();
+  if (inp.taps.has('KeyB') && !typingCode) toggleSfx();
   if (achOpen) {
     // achievements panel is up: Esc / B / T / Y closes it, nothing else reacts
     if (inp.menuPressed || inp.taps.has('KeyT') || inp.padTaps.has(BTN.B) || inp.padTaps.has(BTN.Y)) toggleAch(false);
@@ -1467,24 +1527,23 @@ function tick(dt, now) {
   const scrollY = (inp.lookY || 0) * 900 * dt;
   if (Math.abs(scrollY) > 0.5) {
     if (achOpen) achPanel.scrollTop += scrollY;
-    else if (game.mode === 'menu') menuEl.scrollTop += scrollY;
+    else if (game.mode === 'menu') (howtoOpen ? howtoEl : lobbyNavEl).scrollTop += scrollY;
     else if (game.mode === 'lodge') lodgeEl.scrollTop += scrollY;
     else if (game.mode === 'online') onlineEl.scrollTop += scrollY;
   }
   if (game.mode === 'menu') {
-    if (inp.leftPressed && game.sport === 'board') setStance(true);
-    if (inp.rightPressed && game.sport === 'board') setStance(false);
-    if (inp.upPressed) setSport('board');
-    if (inp.downPressed) setSport('ski');
-    if (inp.taps.has('KeyC') || inp.padTaps.has(BTN.LB)) cycleChar();
-    if (inp.confirmPressed) startHeli();
-    else if (inp.taps.has('KeyL') || inp.padTaps.has(BTN.X)) openLodge();
-    else if (inp.taps.has('KeyF') || inp.padTaps.has(BTN.RB)) openFriends();
-    // slow orbit preview of the rider at the top
-    const t = now / 4000;
-    camera.position.set(rider.pos.x + Math.sin(t) * 7, rider.pos.y + 2.5, rider.pos.z + Math.cos(t) * 7);
-    camera.lookAt(rider.pos.x, rider.pos.y + 0.9, rider.pos.z);
-    rider.updateVisual(dt, inp);
+    if (!lobby.active) openLobby();
+    if (!lobbyNavEl.querySelector('.focus')) menuNav.paint(false);
+    if (howtoOpen) { if (inp.menuPressed || inp.padTaps.has(BTN.B) || inp.confirmPressed) toggleHowto(false); }
+    else if (!achOpen) {
+      menuNav.handle(inp);
+      if (inp.taps.has('KeyC') || inp.padTaps.has(BTN.RB)) cycleChar(1);
+      if (inp.padTaps.has(BTN.LB)) cycleChar(-1);
+      if (inp.taps.has('KeyL') || inp.padTaps.has(BTN.X)) openLodge();
+      else if (inp.taps.has('KeyF')) openFriends();
+    }
+    partyT -= dt; if (partyT <= 0) { partyT = 0.5; renderParty(); renderHints(); }
+    lobby.update(dt, rider, { name: nameEl.value.trim() || 'You', char: game.char }, partyList());
   } else if (game.mode === 'heli') {
     updateHeliMode(dt, inp);
   } else if (game.mode === 'lodge') {
@@ -1623,6 +1682,7 @@ function tick(dt, now) {
     trailMap.draw(rider.pos, ride.mapDots());
   }
 
+  if (game.mode !== 'menu' && lobby.active) { lobby.hide(); toggleHowto(false); }
   if (!(game.mode === 'run' && game.paused)) npcs.update(dt, camera.position, rider.pos);
 
   // wide view of the resort from the lift, normal fog while riding

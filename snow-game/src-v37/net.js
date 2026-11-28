@@ -36,12 +36,12 @@ export class Net {
     await this.leave();
     if (!sharedClient) sharedClient = createClient(URL, KEY, { realtime: { params: { eventsPerSecond: 40 } } });
     this.client = sharedClient;
-    this.code = code; this.status = 'connecting'; this.me = { id: this.id, name: me.name, char: me.char, joinedAt: Date.now() };
+    this.code = code; this.status = 'connecting'; this.me = { ...me, id: this.id, joinedAt: Date.now() };
     const ch = this.client.channel(`snowgame:${kind}:${code}`, { config: { broadcast: { self: false }, presence: { key: this.id } } });
     this.channel = ch;
     ch.on('presence', { event: 'sync' }, () => {
       const st = ch.presenceState(), list = [];
-      for (const id of Object.keys(st)) { const p = st[id][0]; if (p) list.push({ id, name: p.name, joinedAt: p.joinedAt, char: p.char }); }
+      for (const id of Object.keys(st)) { const p = st[id][0]; if (p) list.push({ id, name: p.name, joinedAt: p.joinedAt, char: p.char, sport: p.sport, regular: p.regular }); }
       list.sort((a, b) => a.joinedAt - b.joinedAt || (a.id < b.id ? -1 : 1));
       this.players = list;
       if (this.onPlayers) this.onPlayers(list);
