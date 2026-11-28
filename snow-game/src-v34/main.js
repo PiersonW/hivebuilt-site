@@ -686,6 +686,8 @@ async function leaveOnline(toLodge = true) {
 // leave the friends panel but stay in the room
 function closeFriends(go = false) { onlineEl.classList.add('hidden'); online.view = 'off'; online.kind = 'sbx'; if (go) startHeliOrRun(); else showMenu(); }
 function startHeliOrRun() { startRun(); }
+// start a round of tag for everyone in the room, then go ride
+function startTagRound() { if (ride.tagOn || !ride.startTag()) return; closeFriends(true); }
 // after an online race: back to the room for another
 function backToRoom() {
   if (!net.code) { openLodge(); return; }
@@ -713,9 +715,12 @@ function renderOnline() {
     onlineBody.innerHTML = `<div class="comp-desc">Room code (tell your friends):</div><div class="room-code">${N.code.split('').map(ch => `<span>${ch}</span>`).join('')}</div>` +
       `<div class="panel-title">Riders in the room (${list.length} / ${MAX_PLAYERS})</div><div class="online-players">` +
       list.map(p => `<div class="${p.id === N.id ? 'me' : ''}">${escapeHtml(p.name)}${p.id === N.id ? ' (you)' : ''}</div>`).join('') + '</div>' +
-      `<div class="muted">Go ride: helicopter, summit, lifts or competitions. You'll see each other with name tags (and on the lift's trail map). You stay in the room until you leave it.</div>`;
+      `<div class="muted">Go ride: helicopter, summit, lifts or competitions. You'll see each other with name tags (and on the lift's trail map). You stay in the room until you leave it. ${usePad ? 'X' : 'A / S / D / F'} (a grab button) on the snow shoves whoever's beside you.</div>` +
+      `<div class="tag-box"><b>🏷️ Tag</b> · 3-minute rounds. Whoever is IT rides into someone to tag them (no tag-backs for 3 s). Least time as IT wins. Chairlifts and the helicopter are safe.<br>` +
+      (ride.tagOn ? `<span class="pr">A round is on: ${escapeHtml(ride._nameOf(ride.tag.it))} is IT · ${fmtSecs(ride.tag.left)} left</span>` : list.length < 2 ? '<span class="muted">Needs at least 2 riders in the room.</span>' : `<button id="btn-tag" class="opt">🏷️ Start a round of tag ${usePad ? '(Y)' : '(G)'}</button>`) + '</div>';
+    const tb = document.getElementById('btn-tag'); if (tb) tb.onclick = () => startTagRound();
     go.textContent = 'Go ride!'; go.classList.remove('hidden');
-    help.innerHTML = usePad ? '🎮 <b>A</b> go ride · <b>B</b> back to the menu · <b>X</b> leave the room' : '<b>Enter</b> go ride · <b>Esc</b> back to the menu · <b>X</b> leave the room';
+    help.innerHTML = usePad ? '🎮 <b>A</b> go ride · <b>Y</b> start tag · <b>B</b> back to the menu · <b>X</b> leave the room' : '<b>Enter</b> go ride · <b>G</b> start tag · <b>Esc</b> back to the menu · <b>X</b> leave the room';
     return;
   }
   if (online.view === 'code') {
@@ -759,7 +764,7 @@ function updateOnline(dt, inp) {
     if (online.view === 'code') { onlineEl.classList.add('hidden'); online.view = 'off'; openLodge(); } else leaveOnline(true); return;
   }
   if (rideKind && online.view === 'choose') { if (pad(BTN.X) || inp.taps.has('KeyO')) hostOnline('ride'); else if (pad(BTN.Y) || inp.taps.has('KeyJ')) joinOnline('ride'); }
-  if (rideKind && online.view === 'lobby') { if (inp.confirmPressed) { closeFriends(true); return; } if (pad(BTN.X) || inp.taps.has('KeyX')) { leaveOnline(); return; } }
+  if (rideKind && online.view === 'lobby') { if (inp.confirmPressed) { closeFriends(true); return; } if (pad(BTN.Y) || inp.taps.has('KeyG')) { startTagRound(); return; } if (pad(BTN.X) || inp.taps.has('KeyX')) { leaveOnline(); return; } }
   if (online.view === 'code') {
     let changed = false;
     for (const t of inp.taps) {
@@ -1035,6 +1040,95 @@ function skipLift() {
   curLift.setChairU(chairIdx, curLift.unloadU);
 }
 
+// Bail out mid-ride: push off the chair and drop to the snow, carrying the chair's speed.
+function bailLift() {
+  if (game.mode !== 'lift' || chairIdx < 0) return;
+  if (replayer.active) stopReplay();
+  const st = curLift.chairState(chairIdx), seat = curLift.seatPoint(chairIdx, -1);
+  const camPos = camera.position.clone(), camQ = camera.quaternion.clone();
+  const sp = curLift.speedAt(st.u), dir = st.dir.clone().setY(0).normalize();
+  const yaw = Math.atan2(dir.x, -dir.z);
+  startRun(seat.clone(), yaw);
+  rider.pos.copy(seat).y -= 0.4;
+  rider.vel.copy(dir).multiplyScalar(sp + 1.5); rider.vel.y = 1.5;
+  rider._takeoff(false);
+  rider.events.length = 0;
+  game.started = true;
+  hud.popup('Bailed off the chair!', 0);
+  rider.updateVisual(0, {});
+  runCamBlend = { t: 0, pos: camPos, quat: camQ };
+}
+
+// A shove (grab button on the snow) outside a race: push the nearest friend or skier beside you, maybe knock them over.
+function freeShove() {
+  const A = rider;
+  A.wantShove = false;
+  if (game.mode !== 'run' || A.state !== 'ride') return;
+  A.shoveT = 0.35;
+  let best = null, bd = 2.4;
+  for (const n of npcs.riders) {
+    if (!n.active || n.rider.state === 'crash') continue;
+    const B = n.rider, d = Math.hypot(B.pos.x - A.pos.x, B.pos.z - A.pos.z);
+    if (d < bd && Math.abs(B.pos.y - A.pos.y) < 1.5) { bd = d; best = { bot: B }; }
+  }
+  for (const f of ride.friends.values()) {
+    if (f.off || !f.snaps.length || !['ride', 'air', 'grind'].includes(f.rider.state)) continue;
+    const p = f.rider.root.position, d = Math.hypot(p.x - A.pos.x, p.z - A.pos.z);
+    if (d < bd + 0.4 && Math.abs(p.y - A.pos.y) < 1.8) { bd = d; best = { friend: f }; }     // (a little extra reach: they're drawn slightly in the past)
+  }
+  if (!best) { A.shoveDir = new THREE.Vector3(Math.sin(A.yaw), 0, -Math.cos(A.yaw)); return; }
+  const P = best.bot ? best.bot.pos : best.friend.rider.root.position;
+  const dx = P.x - A.pos.x, dz = P.z - A.pos.z, d = Math.hypot(dx, dz) || 1, nx = dx / d, nz = dz / d;
+  A.shoveDir = new THREE.Vector3(nx, 0, nz);
+  A.vel.x -= nx * 1.2; A.vel.z -= nz * 1.2;
+  if (best.friend) { ride.shoveFriend(best.friend, nx, nz, racerName()); hud.popup(`Shoved ${escapeHtml(best.friend.name)}`, 0); return; }
+  const B = best.bot;
+  B.vel.x += nx * 5.5; B.vel.z += nz * 5.5;
+  const down = Math.random() < 0.45 + (B.state === 'air' ? 0.35 : 0) + (B.speed < 6 ? 0.15 : 0);
+  if (down) B.doCrash('Shoved over!');
+  hud.popup(down ? '💥 Knocked a skier over!' : 'Shoved a skier', 0);
+}
+
+// news from your friends' room: shoves that hit you, and the game of tag
+let tagNews = null;    // { html, t } shown under the room badge for a few seconds
+function rideEvents(dt) {
+  if (tagNews && (tagNews.t -= dt) <= 0) tagNews = null;
+  const showPop = game.mode === 'run';
+  for (const ev of ride.events.splice(0)) {
+    if (ev.type === 'shoved') {
+      if (game.mode !== 'run' || !['ride', 'air', 'grind'].includes(rider.state)) continue;
+      rider.vel.x += ev.nx * 5.5; rider.vel.z += ev.nz * 5.5;
+      chase.shake = 0.5;
+      const down = Math.random() < 0.3 + (rider.state === 'air' ? 0.35 : 0) + (rider.speed < 6 ? 0.15 : 0);
+      if (down) { if (rider.state === 'grind') rider.rail = null; rider.doCrash(`Shoved over by ${ev.name}!`); }
+      else hud.popup(`${escapeHtml(ev.name)} shoved you!`, 0, true);
+    } else if (ev.type === 'tagstart') {
+      const msg = ev.me ? "🏷️ Tag! You're IT. Catch someone!" : `🏷️ Tag! ${escapeHtml(ev.itName)} is IT. Stay away!`;
+      tagNews = { html: msg, t: 5 }; if (showPop) hud.popup(msg, 0, ev.me);
+    } else if (ev.type === 'tag') {
+      const msg = ev.byMe ? `🏷️ You tagged ${escapeHtml(ev.itName)}!` : ev.me ? `🏷️ ${ev.fromName ? escapeHtml(ev.fromName) + ' tagged you! ' : ''}You're IT!` : `🏷️ ${escapeHtml(ev.itName)} is IT`;
+      tagNews = { html: msg, t: 4 }; if (showPop) hud.popup(msg, 0, ev.me);
+      if (ev.me) chase.shake = 0.4;
+      sfx.click();
+    } else if (ev.type === 'tagend') {
+      const w = ev.rows[0];
+      tagNews = { html: `🏁 Tag's over! ${w.me ? 'You win' : escapeHtml(w.name) + ' wins'} (least time as IT)<br>` + ev.rows.map((r, i) => `${i + 1}. ${escapeHtml(r.me ? 'You' : r.name)} · ${fmtSecs(r.secs)}`).join('<br>'), t: 12 };
+      if (showPop) hud.popup(w.me ? '🏁 Tag over: you win!' : `🏁 Tag over: ${escapeHtml(w.name)} wins`, 0);
+    }
+  }
+}
+const fmtSecs = (x) => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, '0')}`;
+function rideBadgeHtml() {
+  let h = `👥 Room ${rideNet.code} · ${ride.count} rider${ride.count === 1 ? '' : 's'}`;
+  if (ride.tagOn) {
+    const t = ride.tag;
+    if (ride.iAmIt) { const n = ride.nearest(rider.pos); h += `<div class="tag-line it">🏷️ YOU'RE IT · ${fmtSecs(t.left)}${n ? `<br>Nearest: ${escapeHtml(n.name)} ${Math.round(n.d)} m` : ''}</div>`; }
+    else { const n = ride.nearest(rider.pos, t.it); h += `<div class="tag-line">🏷️ ${escapeHtml(ride._nameOf(t.it))} is IT · ${fmtSecs(t.left)}${n ? ` · ${Math.round(n.d)} m away` : ''}</div>`; }
+  }
+  if (tagNews) h += `<div class="tag-news">${tagNews.html}</div>`;
+  return h;
+}
+
 // At the top: stand up and slide off the chair the way it was going, then turn wherever you like.
 let runCamBlend = null;
 function unload() {
@@ -1065,8 +1159,8 @@ function updateLiftHelp() {
   if (usePad === liftHelpPad) return;
   liftHelpPad = usePad;
   document.getElementById('lift-hint').innerHTML = usePad
-    ? '🎮 <b>D-pad ↑ ↓</b> pick a highlight · <b>A</b> play it · <b>B</b> stop · <b>RB</b> show/hide highlights · <b>LB</b> map · <b>Y</b> achievements · <b>right stick</b> look around · <b>Menu</b> skip to the top'
-    : 'Look around: arrow keys, drag the mouse, or right stick · M / LB map · H / RB highlights · 1 / 2 / 3 replay · T / Y achievements · Enter / Menu skip to the top';
+    ? '🎮 <b>B</b> jump off the chair · <b>D-pad ↑ ↓</b> pick a highlight · <b>A</b> play it · <b>B</b> stop · <b>RB</b> show/hide highlights · <b>LB</b> map · <b>Y</b> achievements · <b>right stick</b> look around · <b>Menu</b> skip to the top'
+    : '<b>Space</b> jump off the chair · Look around: arrow keys, drag the mouse, or right stick · M / LB map · H / RB highlights · 1 / 2 / 3 replay · T / Y achievements · Enter / Menu skip to the top';
   document.getElementById('hl-help').innerHTML = usePad ? '🎮 D-pad ↑ ↓ to pick, <b>A</b> to play · in the replay: X slow-mo, Y camera, B back' : '1 / 2 / 3 or click to replay';
   renderHighlights();
 }
@@ -1126,6 +1220,7 @@ function liftInput(inp, dt) {
     return;
   }
   if (tap('Enter', 'NumpadEnter') || pad(BTN.MENU)) { skipLift(); return; }
+  if (game.mode === 'lift' && (tap('Space') || pad(BTN.B))) { bailLift(); return; }
   if (tap('Escape') || pad(BTN.VIEW)) { liftEl.classList.add('hidden'); showMenu(); return; }
   if (tap('KeyM') || pad(BTN.LB)) togglePanel('map');
   if (tap('KeyH') || pad(BTN.RB)) togglePanel('hl');
@@ -1351,7 +1446,7 @@ function tick(dt, now) {
       if (sbxOn) sbx.stepBots(STEP);
       acc -= STEP;
     }
-    if (sbxOn) sbx.updateVisuals(dt); else rider.wantShove = false;   // (shoving only means something in a race)
+    if (sbxOn) sbx.updateVisuals(dt); else if (rider.wantShove) freeShove();
     handleEvents();
     if (!game.started && rider.speed > 0.5) game.started = true;
     if (game.started && !game.paused) game.time += dt;
@@ -1486,9 +1581,11 @@ function tick(dt, now) {
   // riding together: send yourself, draw your friends
   ride.send(dt, rider, game.mode, racerName());
   ride.update(dt);
+  ride.updateTag(dt, rider, game.mode);
+  rideEvents(dt);
   const inRide = ride.active && (game.mode === 'run' || game.mode === 'lift' || game.mode === 'liftwait' || game.mode === 'heli');
   rideBadge.classList.toggle('hidden', !inRide);
-  if (inRide) { const t = `👥 Room ${rideNet.code} · ${ride.count} rider${ride.count === 1 ? '' : 's'}`; if (rideBadge.textContent !== t) rideBadge.textContent = t; }
+  if (inRide) { const h = rideBadgeHtml(); if (rideBadge.innerHTML !== h) rideBadge.innerHTML = h; }
   // sound effects follow what you're doing
   const st = rider.state, onLiftNow = game.mode === 'lift' || game.mode === 'liftwait';
   sfx.update(dt, {

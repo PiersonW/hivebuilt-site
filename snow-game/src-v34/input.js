@@ -131,7 +131,7 @@ export const CONTROLS = [
   ['Push along when slow / stand up / front flip', '↑', 'Stick up'],
   ['Jump (hold to charge)', 'Space', 'A'],
   ['Brake / skid', 'Shift', 'LT'],
-  ['Grab 1 (Indy / Safety)', 'A', 'X'],
+  ['Grab 1 (Indy / Safety) · on the snow: shove', 'A', 'X'],
   ['Grab 2 (Melon / Mute)', 'S', 'B'],
   ['Grab 3 (Method / Japan)', 'D', 'LB'],
   ['Grab 4 (Nose / Tail)', 'F', 'Y'],

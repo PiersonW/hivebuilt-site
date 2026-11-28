@@ -240,7 +240,7 @@ export class Npcs {
       tx = a.x - a.tz * lat; tz = a.z + a.tx * lat;
       // give the player some room
       const dx = this.playerPos.x - p.x, dz = this.playerPos.z - p.z, pd = Math.hypot(dx, dz);
-      if (pd < 10 && pd > 0.01) { tx -= dx / pd * (10 - pd) * 1.5; tz -= dz / pd * (10 - pd) * 1.5; }
+      if (pd < 6 && pd > 0.01) { tx -= dx / pd * (6 - pd) * 1.2; tz -= dz / pd * (6 - pd) * 1.2; }
       if (d > run.width / 2 + 30) n.slowT += dt * 2;                // way off the run: give up sooner
     }
     let want = Math.atan2(tx - p.x, -(tz - p.z));
