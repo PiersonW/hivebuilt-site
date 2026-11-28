@@ -31,8 +31,8 @@ export const TUNE = {
   jumpLift: 0.22,         // long jump flight position: share of gravity held up at ~60 mph
   stick: 0.0035,          // how hard the board holds the snow over rolls (higher = fewer little hops)
   maxLaunch: 7.5,         // m/s off a kicker, measured away from the landing slope
-  maxSpeed: 28,           // m/s (~63 mph): above this the snow starts holding you back
-  topSpeed: 65 / 2.237,   // hard cap: 65 mph
+  maxSpeed: 44,           // m/s (~98 mph): above this the snow starts holding you back (only steep runs get you here)
+  topSpeed: 100 / 2.237,  // hard cap: 100 mph
   crashTime: 4,           // longest tumble before getting up
   getupTime: 1.3,         // seconds to stand back up
   landImpact: 32,         // m/s into the slope = too hard a landing
@@ -525,7 +525,16 @@ export class Rider {
 
   step(dt, input) {
     if (this.state === 'lift' || this.state === 'heli') return;
-    if (this.state === 'fly') { this._fly(dt, input); return; }
+    if (this.state === 'fly') {
+      this._fly(dt, input);
+      // wingsuit or parachute: hold grind as you fly over a chairlift cable to drop onto it
+      this.railCooldown = Math.max(0, this.railCooldown - dt);
+      if (this.state === 'fly' && input.grind && this.railCooldown <= 0 && !this.npc) {
+        this._tryRail(input);
+        if (this.state === 'grind') { this._endFlight(); this.alignQ.identity(); }
+      }
+      return;
+    }
     if (this.state === 'ride' && this.climbing) this._climb(dt, input);
     else if (this.state === 'ride') this._ground(dt, input);
     else if (this.state === 'air') this._air(dt, input);
@@ -875,6 +884,7 @@ export class Rider {
   _clearAt(x, z, pad = 0) {
     if (this.terrain.treeNear(x, z)) return false;
     for (const r of this.terrain.rails || []) {
+      if (r.kind === 'cable' || r.kind === 'liftcable') continue;
       const dx = x - r.p0.x, dz = z - r.p0.z, u = (dx * r.dirH.x + dz * r.dirH.z) / r.lenH;
       if (u < -0.05 || u > 1.05) continue;
       if (Math.abs(-dx * r.dirH.z + dz * r.dirH.x) < r.halfW + 0.4 + pad) return false;
@@ -1166,11 +1176,14 @@ export class Rider {
     if (!magnet) { if (this.state === 'ride' && !this.npc) this._railBump(); return; }
     const p = this.pos, v = this.vel, vh = Math.hypot(v.x, v.z);
     if (vh < 2 || v.y > (magnet ? 4 : 2.5)) return;
+    // the chairlift cables are way up high: only worth checking when you're flying past
+    const high = (this.state === 'air' || this.state === 'fly') && p.y - this.terrain.heightAt(p.x, p.z) > 4;
     for (const r of rails) {
+      if (r.kind === 'liftcable' && !high) continue;
       const dx = p.x - r.p0.x, dz = p.z - r.p0.z;
       if (dx * dx + dz * dz > (r.lenH + 3) * (r.lenH + 3)) continue;
       const u = (dx * r.dirH.x + dz * r.dirH.z) / r.lenH;
-      if (u < 0.02 || u > 0.97) continue;
+      if (u < (r.prev ? 0 : 0.02) || u > (r.next ? 1 : 0.97)) continue;
       const lat = Math.abs(-dx * r.dirH.z + dz * r.dirH.x);
       if (lat > r.halfW + (magnet ? 1.3 : 0.35)) continue;
       const ry = r.p0.y + (r.p1.y - r.p0.y) * u;
@@ -1187,6 +1200,7 @@ export class Rider {
     const p = this.pos;
     if (Math.hypot(this.vel.x, this.vel.z) < 1.5) return;
     for (const r of this.terrain.rails) {
+      if (r.kind === 'cable' || r.kind === 'liftcable') continue;     // up in the air: you go under them
       const dx = p.x - r.p0.x, dz = p.z - r.p0.z;
       if (dx * dx + dz * dz > (r.lenH + 2) * (r.lenH + 2)) continue;
       const u = (dx * r.dirH.x + dz * r.dirH.z) / r.lenH;
@@ -1215,29 +1229,73 @@ export class Rider {
     this.railV = this.vel.dot(r.dir3);
     this.yaw = railHead;
     this.flip = 0; this.flipVel = 0; this.grab = null; this.phantomT = -1;
-    this._slideLatch = true;
+    // balance: you start a little off centre; steer left / right to stay on (see _grind)
+    this.bal = (Math.random() - 0.5) * 0.3; this.balVel = 0; this.balT = Math.random() * 10; this.chairWarn = false; this._cableJumpHeld = true;
     this.events.push({ type: 'grind-start', fromAir: wasAir });
   }
 
   _grind(dt, input) {
-    const r = this.rail;
+    let r = this.rail;
     this.railV += -G * r.dir3.y * dt;                                   // gravity along the rail
     this.railV -= Math.sign(this.railV) * Math.min(Math.abs(this.railV), TUNE.railFriction * dt);
     this.railU += this.railV * dt;
-    // left/right while grinding swaps between 50-50 and boardslide
-    if (!input.steer) this._slideLatch = false;
-    else if (!this._slideLatch) { this._slideLatch = true; this.boardslide = this.boardslide ? 0 : Math.sign(input.steer); }
+    // curved rails and cables are short pieces linked together: carry on into the next piece
+    while (this.railU > r.len && r.next) { this.railU -= r.len; r = this.rail = r.next; }
+    while (this.railU < 0 && r.prev) { r = this.rail = r.prev; this.railU += r.len; }
+    this.yaw = Math.atan2(r.dirH.x * Math.sign(this.railV || 1), -r.dirH.z * Math.sign(this.railV || 1));
+    // balance: you keep tipping one way or the other; steer against it. Tip too far and you're off.
+    this.balT += dt;
+    const wobble = Math.sin(this.balT * 2.1) * 0.7 + Math.sin(this.balT * 4.7 + 1.3) * 0.45;
+    const hard = r.kind === 'liftcable' || r.kind === 'cable' ? 1.35 : 1;      // a wire is harder than a rail
+    this.balVel += (this.bal * 2.8 + wobble * 1.4) * hard * dt + (input.steer || 0) * 5.0 * dt;   // press the way you want the dot to go
+    this.balVel *= Math.exp(-1.6 * dt);
+    this.bal += this.balVel * dt;
+    if (Math.abs(this.bal) >= 1) {
+      // fall off the side you tipped toward
+      const side = Math.sign(this.bal), px = -r.dirH.z * side, pz = r.dirH.x * side;
+      this.vel.copy(r.dir3).multiplyScalar(this.railV); this.vel.x += px * 2; this.vel.z += pz * 2;
+      this.pos.x += px * 0.4; this.pos.z += pz * 0.4;
+      this.rail = null; this.railCooldown = 0.6;
+      this.doCrash('Lost your balance!');
+      return;
+    }
+    // chairs ride the lift cable too: a warning when one is coming (jump over it!), and it knocks you off if it hits you
+    this.chairWarn = false;
+    if (r.kind === 'liftcable' && r.lift) {
+      const L = r.lift;
+      for (let i = 0; i < L.chairs.length; i++) {
+        const c = L.chairs[i].position;
+        const d = Math.hypot(c.x - this.pos.x, c.z - this.pos.z);
+        if (d < 14 && Math.abs(c.y - this.pos.y) < 3) this.chairWarn = true;
+        if (Math.abs(c.x - this.pos.x) < 1.2 && Math.abs(c.z - this.pos.z) < 1.2 && this.pos.y - c.y < 0.9 && this.pos.y - c.y > -1.2) {
+          this.vel.copy(r.dir3).multiplyScalar(this.railV * 0.5); this.vel.y -= 1;
+          this.rail = null; this.railCooldown = 0.8;
+          this.doCrash('Knocked off by a chair!');
+          return;
+        }
+      }
+    }
     this.pos.copy(r.p0).addScaledVector(r.dir3, this.railU); this.pos.y += r.top;
     this.vel.copy(r.dir3).multiplyScalar(this.railV);
-    this.crouch = damp(this.crouch, 0.35, 8, dt); this.lean = damp(this.lean, 0, 8, dt);
+    this.crouch = damp(this.crouch, 0.35, 8, dt); this.lean = damp(this.lean, this.bal * 0.9, 10, dt);
     this.brakeAmt = 0; this.spray = 0;
     const ski = this.sport === 'ski';
     const name = r.kind === 'box' ? (this.boardslide ? 'Box Slide' : 'Box 50-50')
       : r.kind === 'log' ? (this.boardslide ? 'Log Slide' : 'Log Ride')
+      : r.kind === 'liftcable' ? 'Chairlift Cable Grind'
+      : r.kind === 'cable' ? (this.boardslide ? 'Cable Slide' : 'Cable Grind')
+      : r.kind === 'srail' ? (this.boardslide ? 'S-Rail Slide' : 'S-Rail 50-50')
       : (this.boardslide ? (ski ? 'Rail Slide' : 'Boardslide') : (ski ? 'Ski 50-50' : '50-50'));
     this.events.push({ type: 'grind', name, dt });
+    // on a chairlift cable the jump pops the moment you press it (no time to charge with a chair coming)
+    if (r.kind === 'liftcable' && input.jump && !this._cableJumpHeld) {
+      this._cableJumpHeld = true;
+      this.vel.y += TUNE.jumpBase + TUNE.jumpCharge * 0.45; this.charge = 0;
+      this.railCooldown = 0.35; this._takeoff(true, true); return;
+    }
+    if (!input.jump) this._cableJumpHeld = false;
     // pop off with a jump, or ride off the end
-    if (input.jump) this.charge = Math.min(1, this.charge + dt / TUNE.chargeTime);
+    if (input.jump && r.kind !== 'liftcable') this.charge = Math.min(1, this.charge + dt / TUNE.chargeTime);
     if (!input.jump && this.charge > 0) {
       this.vel.y += TUNE.jumpBase + TUNE.jumpCharge * this.charge * 0.7; this.charge = 0;
       this.railCooldown = 0.4; this._takeoff(true, true); return;

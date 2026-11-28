@@ -3,7 +3,7 @@ import { CONTROLS } from './input.js';
 import { drawDiffIcon } from './terrain.js';
 import { DIFF } from './runs.js';
 
-export const MAX_MPH = 65;
+export const MAX_MPH = 100;
 
 const $ = (id) => document.getElementById(id);
 
@@ -36,15 +36,15 @@ export class Hud {
 
   show(on) { this.el.hud.classList.toggle('hidden', !on); }
 
-  // Dial speedometer, 0 to 65 mph.
+  // Dial speedometer, 0 to 100 mph.
   _buildSpeedo() {
     const A0 = -125, A1 = 125, R = 62, cx = 85, cy = 80;
     const pt = (deg, r) => { const a = (deg - 90) * Math.PI / 180; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; };
     const arc = (d0, d1, r) => { const [x0, y0] = pt(d0, r), [x1, y1] = pt(d1, r); return `M${x0},${y0} A${r},${r} 0 ${d1 - d0 > 180 ? 1 : 0} 1 ${x1},${y1}`; };
     const deg = (mph) => A0 + (A1 - A0) * mph / MAX_MPH;
     let ticks = '';
-    for (let m = 0; m <= MAX_MPH; m += 5) {
-      const big = m % 10 === 0 || m === MAX_MPH;
+    for (let m = 0; m <= MAX_MPH; m += 10) {
+      const big = m % 20 === 0 || m === MAX_MPH;
       const [x0, y0] = pt(deg(m), R - (big ? 11 : 6)), [x1, y1] = pt(deg(m), R);
       ticks += `<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="#fff" stroke-width="${big ? 2.5 : 1.2}" opacity="0.9"/>`;
       if (big) { const [tx, ty] = pt(deg(m), R - 21); ticks += `<text x="${tx}" y="${ty + 4}" fill="#fff" font-size="11" text-anchor="middle" opacity="0.85">${m}</text>`; }

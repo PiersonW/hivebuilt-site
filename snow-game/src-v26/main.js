@@ -424,6 +424,8 @@ function updateJumpHud() {
 
 // ---------- competitions (sign up at the Base Lodge) ----------
 const compHudEl = document.getElementById('comp-hud');
+const balanceEl = document.getElementById('balance'), balDot = document.getElementById('bal-dot');
+const balLabel = balanceEl.querySelector('.bal-label');
 const lodgeEl = document.getElementById('lodge-panel'), lodgeHintEl = document.getElementById('lodge-hint');
 let comp = null;          // { id, state: 'ready' | 'live' | 'done', score, stillT, offT }
 let lodgeSel = 0;
@@ -655,6 +657,9 @@ const gullyTime = [0, 0, 0, 0, 0, 0];
 function trackAch(dt) {
   const st = rider.state;
   if ((st === 'ride' || st === 'air') && rider.speed >= 64.5 / 2.237) ach.unlock('speed');
+  if ((st === 'ride' || st === 'air') && rider.speed >= 99.5 / 2.237) ach.unlock('speed100');
+  if (st === 'grind' && rider.rail && rider.rail.kind === 'liftcable') ach.unlock('cable');
+  if (st === 'grind' && rider.rail && rider.rail.kind === 'srail' && !rider.rail.next) ach.unlock('srail');
   if (game.score >= 10000) ach.unlock('score10k');
   if (st === 'air' && airCtx && airCtx.pipeAir) airCtx.lipMax = Math.max(airCtx.lipMax, rider.pos.y - terrain.terrainHeight(rider.pos.x, rider.pos.z) - PIPE.H);
   if (st === 'ride') {
@@ -1211,6 +1216,14 @@ function tick(dt, now) {
     if (game.mode === 'run') updateRace(dt);
     if (game.mode === 'run') updateJumpHud();
     if (game.mode === 'run') updateComp(dt);
+    // balance meter while grinding
+    const grinding = game.mode === 'run' && rider.state === 'grind';
+    balanceEl.classList.toggle('hidden', !grinding);
+    if (grinding) {
+      balDot.style.left = `${50 + 50 * Math.max(-1, Math.min(1, rider.bal || 0))}%`;
+      const warn = !!rider.chairWarn, txt = warn ? `🚡 CHAIR COMING! JUMP (${input.padName ? 'A' : 'Space'}), keep holding grind` : 'BALANCE · steer ← → to stay on';
+      if (balLabel.textContent !== txt) { balLabel.textContent = txt; balLabel.classList.toggle('warn', warn); }
+    }
     if (game.mode === 'run') updateLodgeDoor(inp);
     // stopped on a flat: remind how to push along
     const slow = game.mode === 'run' && rider.state === 'ride' && rider.speed < 1.2 && !inLane && rider.pushAmt < 0.2;

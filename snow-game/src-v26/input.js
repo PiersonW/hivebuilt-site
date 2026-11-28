@@ -136,7 +136,7 @@ export const CONTROLS = [
   ['Grab 3 (Method / Japan)', 'D', 'LB'],
   ['Grab 4 (Nose / Tail)', 'F', 'Y'],
   ['Phantom Flip (gear off feet)', 'W', 'Left stick click'],
-  ['Grind: hold it to get on a rail, box or log (+ ← → = boardslide)', 'E', 'RB (hold)'],
+  ['Grind: hold it to get on a rail, box, log or cable (on it, ← → keep your balance)', 'E', 'RB (hold)'],
   ['Look around (lets go = back behind you)', 'Shift + arrows when stopped', 'Right stick'],
   ['Restart (retries a competition) / menu', 'R / Esc', 'Menu / View'],
   ['Lodge competitions (stopped at the lodge door)', 'Enter', 'A'],

@@ -179,3 +179,11 @@ kbd { font-family: inherit; font-size: 10px; border: 1px solid rgba(255,255,255,
 #lodge-panel, #ach-panel { scroll-behavior: auto; }
 
 .gfx-reset { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0d1b33; color: #fff; font-size: 28px; z-index: 99; }
+
+/* balance meter while grinding */
+#balance { position: absolute; bottom: 24%; left: 50%; transform: translateX(-50%); width: 300px; text-align: center; }
+#balance .bal-label { font-size: 12px; letter-spacing: 1px; text-shadow: 0 1px 4px rgba(0,0,0,0.7); }
+.bal-bar { position: relative; height: 14px; margin-top: 4px; border-radius: 7px; background: linear-gradient(90deg, #d8362b 0%, #ffb02e 22%, #2fbf71 40%, #2fbf71 60%, #ffb02e 78%, #d8362b 100%); box-shadow: 0 1px 6px rgba(0,0,0,0.4); }
+.bal-mid { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; background: #fff; opacity: 0.8; }
+#bal-dot { position: absolute; top: -4px; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%; background: #fff; border: 3px solid #1d2a44; left: 50%; }
+#balance .bal-label.warn { color: #ffd23a; font-size: 16px; font-weight: bold; }

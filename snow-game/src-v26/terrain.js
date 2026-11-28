@@ -39,6 +39,10 @@ const PARK = {
     [-1215, -12, 14, 'rail', 0.3], [-1215, 0, 10, 'box', 0.25], [-1215, 12, 12, 'rail', 0.3],
   ],
   pipe: { z0: -1022, z1: -1148 },
+  // an S-curved rail, and a "lift cable" strung between two mini lift towers with a kicker to get up onto it
+  sRail: { z: -470, off: -10, len: 26, swing: 2.6, h: 0.55 },
+  cableRail: { z: -562, off: 11, len: 24, h: 1.75 },
+  extraKickers: [[-549, 11, 'M']],     // [z, offset, size]: the run-up kicker for the cable rail
 };
 // Halfpipe shape (m): flat bottom half-width, transition radius, wall height, deck width
 export const PIPE = { fw: 4.5, R: 5.5, H: 4.5, deck: 3 };
@@ -822,6 +826,7 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
     const lipMat = new THREE.MeshStandardMaterial({ color: 0x2a64c8, roughness: 0.6 });
     const list = KICKERS.map(([rid, zAt, off, lip, len, w]) => [rid, this.runById[rid].sAtZ(zAt), off, lip, len, w]);
     for (const [zAt, line] of PARK.jumps) for (const [size, off] of line) list.push([PARK.run, this.runById[PARK.run].sAtZ(zAt), off, ...JUMP[size]]);
+    for (const [zAt, off, size] of PARK.extraKickers) list.push([PARK.run, this.runById[PARK.run].sAtZ(zAt), off, ...JUMP[size]]);
     this.parkMat = { mat, lipMat };
     for (const [rid, sAt, off, lipAngle, len, w] of list) {
       const run = this.runById[rid];
@@ -837,6 +842,68 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
       k.profile = (u) => { const f = Math.min(N - 1e-6, (u / len) * N); const n = Math.floor(f); return prof[n] + (prof[n + 1] - prof[n]) * (f - n); };
       this.kickers.push(k);
       this.scene.add(this._kickerMesh(k, prof, N, mat, lipMat));
+    }
+  }
+
+  // A rail you can grind along a path: short straight pieces linked end to end (r.next / r.prev), so curves
+  // and cables work with the same grind code as straight rails. Returns the pieces.
+  addRailChain(pts, kind, halfW = 0.06, top = 0.05, extra = {}) {
+    const segs = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i], p1 = pts[i + 1], d = p1.clone().sub(p0), L = d.length();
+      if (L < 1e-3) continue;
+      const dirH = new THREE.Vector3(d.x, 0, d.z), lenH = dirH.length(); dirH.normalize();
+      const r = { p0, p1, dir3: d.clone().normalize(), dirH, len: L, lenH, kind, halfW, top, ...extra };
+      if (segs.length) { r.prev = segs[segs.length - 1]; r.prev.next = r; }
+      segs.push(r); this.rails.push(r);
+    }
+    return segs;
+  }
+
+  _buildCurvedRails(run, post) {
+    const T = this, along = (s, off) => { const a = run.at(s); return new THREE.Vector3(a.x - a.tz * off, 0, a.z + a.tx * off); };
+    // S rail: swings left then right, a knee-high red rail on posts
+    {
+      const R = PARK.sRail, s0 = run.sAtZ(R.z), ctrl = [];
+      for (let k = 0; k <= 4; k++) { const p = along(s0 + k * R.len / 4, R.off + [0, R.swing, 0, -R.swing, 0][k]); p.y = T.terrainHeight(p.x, p.z) + R.h; ctrl.push(p); }
+      const curve = new THREE.CatmullRomCurve3(ctrl, false, 'centripetal');
+      const pts = curve.getSpacedPoints(36);
+      for (const p of pts) p.y = T.terrainHeight(p.x, p.z) + R.h;          // keep a steady height over the snow
+      this.addRailChain(pts, 'srail');
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 120, 0.055, 8), new THREE.MeshStandardMaterial({ color: 0xd8362b, metalness: 0.5, roughness: 0.35 }));
+      tube.castShadow = true; this.scene.add(tube);
+      for (let i = 2; i < pts.length - 1; i += 5) {
+        const q = pts[i], gy = T.terrainHeight(q.x, q.z);
+        const pst = new THREE.Mesh(new THREE.BoxGeometry(0.08, q.y - gy + 0.2, 0.08), post);
+        pst.position.set(q.x, (q.y + gy - 0.2) / 2, q.z); pst.castShadow = true; this.scene.add(pst);
+      }
+    }
+    // lift-cable rail: a steel cable hanging between two mini lift towers, sagging a little in the middle
+    {
+      const R = PARK.cableRail, s0 = run.sAtZ(R.z), N = 24, pts = [];
+      for (let i = 0; i <= N; i++) {
+        const t = i / N, p = along(s0 + t * R.len, R.off);
+        const a = along(s0, R.off), b = along(s0 + R.len, R.off);
+        const ya = T.terrainHeight(a.x, a.z) + R.h, yb = T.terrainHeight(b.x, b.z) + R.h;
+        p.y = ya + (yb - ya) * t - 0.35 * Math.sin(Math.PI * t);
+        pts.push(p);
+      }
+      this.addRailChain(pts, 'cable', 0.05, 0.04);
+      const steel = new THREE.MeshStandardMaterial({ color: 0x8d95a1, metalness: 0.6, roughness: 0.4 });
+      const dark = new THREE.MeshStandardMaterial({ color: 0x23272e, roughness: 0.5 });
+      const blue = new THREE.MeshStandardMaterial({ color: 0x2a64c8, roughness: 0.5 });
+      const cable = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 60, 0.04, 6), dark);
+      cable.castShadow = true; this.scene.add(cable);
+      for (const p of [pts[0], pts[N]]) {
+        const gy = T.terrainHeight(p.x, p.z), g = new THREE.Group();
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, p.y - gy + 0.3, 8), steel); pole.position.y = (p.y - gy + 0.3) / 2 - 0.35;
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.12, 0.2), blue); arm.position.y = 0.0;
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.08, 14), dark); wheel.rotation.z = Math.PI / 2; wheel.position.set(0, 0.1, 0);
+        g.add(pole, arm, wheel); g.position.set(p.x, p.y - 0.12, p.z);
+        g.rotation.y = Math.atan2(pts[N].x - pts[0].x, pts[N].z - pts[0].z);     // crossarm across the cable
+        g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+        this.scene.add(g);
+      }
     }
   }
 
@@ -883,6 +950,7 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
         this.scene.add(g);
       }
     }
+    this._buildCurvedRails(run, post);
     // entrance banner across the top of the park
     const a = run.at(28), px = -a.tz, pz = a.tx, hw = run.hw - 4;
     const c = document.createElement('canvas'); c.width = 1024; c.height = 96;

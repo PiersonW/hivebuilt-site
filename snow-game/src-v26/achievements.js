@@ -21,6 +21,9 @@ export const ACHIEVEMENTS = [
   { id: 'hang', icon: '⏱️', name: 'Hang Time', desc: 'Stay in the air for 2.5 seconds and land it.', group: 'Tricks' },
   { id: 'score10k', icon: '💯', name: 'Big Score', desc: 'Score 10,000 points in one run.', group: 'Tricks' },
   { id: 'speed', icon: '⚡', name: 'Speed Demon', desc: 'Hit 65 mph.', group: 'Tricks' },
+  { id: 'speed100', icon: '🚀', name: 'Ton Up', desc: 'Hit 100 mph (find a long steep run and tuck).', group: 'Tricks' },
+  { id: 'cable', icon: '🚡', name: 'Cable Car', desc: 'Grind a chairlift cable.', group: 'Tricks', hidden: true },
+  { id: 'srail', icon: '〰️', name: 'S-Bend', desc: 'Grind the whole S-rail.', group: 'Tricks' },
   // places
   { id: 'runs', icon: '🗺️', name: 'Mountain Tour', desc: 'Ride every run on the mountain.', group: 'Explore', goal: 8 },
   { id: 'lifts', icon: '🚡', name: 'Lift Lapper', desc: 'Ride all three chairlifts.', group: 'Explore', goal: 3 },

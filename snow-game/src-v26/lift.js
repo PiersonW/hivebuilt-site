@@ -42,6 +42,11 @@ export class Chairlift {
     this._layoutTowers();
     this._buildPath();
     this._buildMeshes();
+    // both cables, tower to tower, can be ground from the air (hold RB as you fly past one)
+    for (const side of [1, -1]) {
+      const pts = this.towers.slice(1, -1).map(t => t.clone().addScaledVector(this.p, side * WHEEL_R));
+      if (pts.length > 1) terrain.addRailChain(pts, 'liftcable', 0.05, 0.06, { lift: this });
+    }
     terrain.clearTreesAlong(this.bottom, this.top, 7);
     for (const t of this.towers.slice(1, -1)) terrain.addObstacle(t.x, t.z, 0.7, t.y - terrain.terrainHeight(t.x, t.z), 'tower');
 
