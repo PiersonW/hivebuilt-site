@@ -22,6 +22,7 @@ import { YETI, PIPE } from './terrain.js';
 import { SKI_GRABS } from './rider.js';
 import { TreeLOD } from './trees.js';
 import { SbxRace } from './sbx.js';
+import { Net, newCode, LETTERS, MAX_PLAYERS } from './net.js';
 import { Sfx } from './sfx.js';
 import { Comps, COMPS, COMP_BY_ID, PRIZES, FINISH_PRIZE, ACH_PRIZE, fmtValue, ordinal, money } from './comps.js';
 
@@ -83,6 +84,7 @@ const rider = new Rider(scene, terrain);
 const heli = new Helicopter(scene);
 const race = new Race(scene, terrain);
 const sbx = new SbxRace(scene, terrain);    // snowboard cross: you and 5 bots out of the start gate
+const net = new Net();                      // online snowboard cross with friends (room codes)
 const longJump = new LongJump(terrain);
 // background music (original pop-punk): starts on the first click / key / controller press (browser rule)
 const music = new Music();
@@ -211,7 +213,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { sbx, sfx, treeLod, comps, enterComp: (id) => enterComp(id), openLodge: () => openLodge(), getComp: () => comp, music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
+window.__game = { net, sbx, sfx, treeLod, comps, enterComp: (id) => enterComp(id), openLodge: () => openLodge(), getComp: () => comp, music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -448,15 +450,17 @@ function compStart(id) {
   return { pos: new THREE.Vector3(x, terrain.heightAt(x, z), z), yaw };
 }
 
-function enterComp(id) {
+function enterComp(id, plan = null) {
   const c = COMP_BY_ID[id], st = compStart(id);
+  onlineEl.classList.add('hidden');
   lodgeEl.classList.add('hidden'); lodgeHintEl.classList.add('hidden');
   startRun(st.pos, st.yaw);
   rider.vel.set(Math.sin(st.yaw), 0, -Math.cos(st.yaw)).multiplyScalar(1.5);
   game.holdJump = true;
   comp = { id, state: 'ready', score: 0, stillT: 0, offT: 0 };
   if (id === 'sbx') {
-    const lane = sbx.start({ rider, name: racerName() });
+    const lane = sbx.start({ rider, name: racerName() }, 5, plan ? { net, plan, host: net.isHost } : null);
+    comp.online = !!plan;
     rider.reset(lane.pos.clone(), lane.yaw); rider.vel.set(0, 0, 0); chase.snap(rider);
   }
   raceResultEl.classList.add('hidden'); raceResultT = 0;
@@ -478,8 +482,8 @@ function finishComp(value, why = null, livePlace = null) {
   if (comp.id === 'sbx') {
     // this race's finishing order (riders still on course get an estimated time)
     html += '<div class="panel-title" style="margin-top:10px">This race</div><table class="race-board">' + sbx.results().map((e, i) =>
-      `<tr class="${e.kind === 'you' ? 'me' : ''}"><td>${i + 1}</td><td>${e.kind === 'you' ? `${escapeHtml(e.name)} (you)` : escapeHtml(e.name)}</td><td>${fmtValue(c, e.time)}${e.est ? ' *' : ''}</td><td>${i < PRIZES.length ? money(PRIZES[i]) : ''}</td></tr>`).join('') + '</table><div class="muted">* still racing (estimated)</div>';
-    html += `<div class="muted">${input.padName ? 'Menu button' : 'R'}: race again · ${input.padName ? 'View' : 'Esc'}: menu</div>`;
+      `<tr class="${e.kind === 'you' ? 'me' : ''}"><td>${i + 1}</td><td>${e.kind === 'you' ? `${escapeHtml(e.name)} (you)` : e.kind === 'friend' ? `🌐 ${escapeHtml(e.name)}` : escapeHtml(e.name)}</td><td>${e.dnf ? 'DNF' : fmtValue(c, e.time) + (e.est ? ' *' : '')}</td><td>${i < PRIZES.length ? money(PRIZES[i]) : ''}</td></tr>`).join('') + '</table><div class="muted">* still racing (estimated)</div>';
+    html += `<div class="muted">${input.padName ? 'Menu button' : 'R'}: ${comp.online ? 'back to the room for another race' : 'race again'} · ${input.padName ? 'View' : 'Esc'}: menu</div>`;
   } else html += `<div class="panel-title" style="margin-top:10px">${c.name} standings</div>${comps.boardHtml(comp.id, mine)}` +
     `<div class="muted">${input.padName ? 'Menu button' : 'R'}: try again · ${input.padName ? 'View' : 'Esc'}: menu (pick another event at the lodge)</div>`;
   raceResultEl.innerHTML = html;
@@ -603,8 +607,10 @@ function renderLodge() {
   const c = COMPS[lodgeSel];
   document.getElementById('lodge-detail').innerHTML = `<div class="comp-desc">${c.icon} <b>${c.name}</b> · ${c.desc}</div>` +
     `<div class="muted">Prizes: ${PRIZES.map((v, i) => `${ordinal(i + 1)} ${money(v)}`).join(' · ')} · finishing ${money(FINISH_PRIZE)} · each achievement ${money(ACH_PRIZE)}</div>` +
-    comps.boardHtml(c.id, null);
-  document.getElementById('lodge-enter').textContent = `Sign up: ${c.name}`;
+    comps.boardHtml(c.id, null) +
+    (c.id === 'sbx' ? `<div class="online-btns"><button id="btn-host" class="opt">🌐 Host an online race ${usePad ? '(X)' : '(O)'}</button><button id="btn-join" class="opt">🔑 Join with a code ${usePad ? '(Y)' : '(J)'}</button></div>` : '');
+  if (c.id === 'sbx') { document.getElementById('btn-host').onclick = () => hostOnline(); document.getElementById('btn-join').onclick = () => joinOnline(); }
+  document.getElementById('lodge-enter').textContent = c.id === 'sbx' ? 'Race the bots' : `Sign up: ${c.name}`;
   document.getElementById('lodge-help').innerHTML = usePad ? '🎮 D-pad pick · <b>A</b> sign up · <b>B</b> back outside' : '← → pick · <b>Enter</b> sign up · <b>Esc</b> back outside · or click';
 }
 
@@ -615,6 +621,8 @@ function updateLodge(dt, inp) {
   if (inp.rightPressed || inp.downPressed) { lodgeSel = (lodgeSel + 1) % n; renderLodge(); }
   if (inp.confirmPressed) { enterComp(COMPS[lodgeSel].id); return; }
   if (inp.menuPressed || pad(BTN.B)) { closeLodge(); return; }
+  if (COMPS[lodgeSel].id === 'sbx' && (pad(BTN.X) || inp.taps.has('KeyO'))) { hostOnline(); return; }
+  if (COMPS[lodgeSel].id === 'sbx' && (pad(BTN.Y) || inp.taps.has('KeyJ'))) { joinOnline(); return; }
   // camera: out in front of the lodge, looking at the door
   const t = performance.now() / 9000;
   camera.position.set(LODGE.x + 14 + Math.sin(t) * 3, terrain.heightAt(LODGE.x, LODGE.z + 30) + 6, LODGE.z + 32);
@@ -624,6 +632,108 @@ function updateLodge(dt, inp) {
 }
 document.getElementById('lodge-enter').onclick = () => enterComp(COMPS[lodgeSel].id);
 document.getElementById('lodge-close').onclick = () => closeLodge();
+
+// ---------- online snowboard cross (room codes) ----------
+const onlineEl = document.getElementById('online-panel'), onlineBody = document.getElementById('online-body');
+const online = { view: 'off', code: ['A', 'A', 'A', 'A'], cur: 0, msg: '' };
+net.on = (event, payload) => {
+  if (event === 'start') { if (game.mode === 'online') startOnlineRace(payload); }
+  else sbx.receive(event, payload);
+};
+net.onPlayers = (list) => { sbx.playersChanged(list); if (game.mode === 'online') renderOnline(); };
+
+function openOnline(view) {
+  game.mode = 'online'; online.view = view; online.msg = '';
+  lodgeEl.classList.add('hidden'); raceResultEl.classList.add('hidden'); compHudEl.classList.add('hidden'); hud.show(false);
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  onlineEl.classList.remove('hidden');
+  renderOnline();
+}
+async function connectTo(code) {
+  online.view = 'connecting'; online.code = code.split(''); renderOnline();
+  try {
+    await net.join(code, { name: racerName() });
+    // wait a moment for the room list, then make sure there's space
+    await new Promise(r => setTimeout(r, 700));
+    if (net.players.length > MAX_PLAYERS && !net.players.slice(0, MAX_PLAYERS).some(p => p.id === net.id)) { await net.leave(); online.view = 'code'; online.msg = `Room ${code} is full (6 riders).`; }
+    else online.view = 'lobby';
+  } catch (e) { online.view = 'code'; online.msg = `Couldn't connect: ${e.message}. Check the code and your internet, then try again.`; }
+  if (game.mode === 'online') renderOnline();
+}
+function hostOnline() { openOnline('connecting'); connectTo(newCode()); }
+function joinOnline() { online.code = ['A', 'A', 'A', 'A']; online.cur = 0; openOnline('code'); }
+async function leaveOnline(toLodge = true) {
+  if (net.code) net.send('left', { id: net.id });
+  await net.leave(); online.view = 'off'; onlineEl.classList.add('hidden');
+  if (toLodge && game.mode === 'online') openLodge();
+}
+// after an online race: back to the room for another
+function backToRoom() {
+  if (!net.code) { openLodge(); return; }
+  sbx.stop(); comp = null; raceResultEl.classList.add('hidden');
+  const p = LODGE_FRONT.clone(); p.y = terrain.heightAt(p.x, p.z); rider.reset(p, Math.PI);
+  openOnline('lobby');
+}
+
+function renderOnline() {
+  const usePad = !!input.padName || IS_XBOX, go = document.getElementById('online-go'), help = document.getElementById('online-help');
+  if (online.view === 'code') {
+    onlineBody.innerHTML = `<div class="comp-desc">Type the 4-letter code from whoever is hosting the race.</div>` +
+      `<div class="room-code">${online.code.map((ch, i) => `<span class="${i === online.cur ? 'cur' : ''}">${ch}</span>`).join('')}</div>` +
+      (online.msg ? `<div class="pr">${escapeHtml(online.msg)}</div>` : '');
+    go.textContent = 'Join'; go.classList.remove('hidden');
+    help.innerHTML = usePad ? '🎮 D-pad ↑ ↓ change letter · ← → move · <b>A</b> join · <b>B</b> back' : 'Type the letters · <b>Enter</b> join · <b>Esc</b> back';
+  } else if (online.view === 'connecting') {
+    onlineBody.innerHTML = '<div class="comp-desc">Connecting…</div>'; go.classList.add('hidden'); help.textContent = '';
+  } else if (online.view === 'lobby') {
+    const host = net.isHost, list = net.players.slice(0, MAX_PLAYERS);
+    onlineBody.innerHTML = `<div class="comp-desc">Room code (tell your friends):</div><div class="room-code">${net.code.split('').map(ch => `<span>${ch}</span>`).join('')}</div>` +
+      `<div class="panel-title">Riders in the room (${list.length} / ${MAX_PLAYERS})</div><div class="online-players">` +
+      list.map((p, i) => `<div class="${p.id === net.id ? 'me' : ''}">${i === 0 ? '⭐ ' : ''}${escapeHtml(p.name)}${p.id === net.id ? ' (you)' : ''}</div>`).join('') + '</div>' +
+      `<div class="muted">${host ? `You're the host: start when everyone's in. ${MAX_PLAYERS - list.length} bot${MAX_PLAYERS - list.length === 1 ? '' : 's'} will fill the empty gates.` : 'Waiting for the host (⭐) to start the race…'}</div>`;
+    go.textContent = 'Start race'; go.classList.toggle('hidden', !host);
+    help.innerHTML = usePad ? `🎮 ${host ? '<b>A</b> start · ' : ''}<b>B</b> leave the room` : `${host ? '<b>Enter</b> start · ' : ''}<b>Esc</b> leave the room`;
+  }
+}
+
+function startOnlineRace(plan) {
+  if (!plan.players.some(p => p.id === net.id)) { online.msg = 'A race started without you. You can join the next one.'; renderOnline(); return; }
+  enterComp('sbx', plan);
+}
+function hostStart() {
+  if (!net.isHost) return;
+  const list = net.players.slice(0, MAX_PLAYERS), lanes = [0, 1, 2, 3, 4, 5].sort(() => Math.random() - 0.5);
+  const plan = { players: list.map((p, i) => ({ id: p.id, name: p.name, lane: lanes[i] })), bots: SbxRace.botPlan(MAX_PLAYERS - list.length, lanes.slice(list.length)) };
+  net.send('start', plan);
+  startOnlineRace(plan);
+}
+document.getElementById('online-go').onclick = () => { if (online.view === 'code') connectTo(online.code.join('')); else if (online.view === 'lobby') hostStart(); };
+document.getElementById('online-leave').onclick = () => leaveOnline(true);
+
+function updateOnline(dt, inp) {
+  const pad = (...b) => b.some(i => inp.padTaps.has(i));
+  if (inp.menuPressed || pad(BTN.B)) { if (online.view === 'code') { onlineEl.classList.add('hidden'); online.view = 'off'; openLodge(); } else leaveOnline(true); return; }
+  if (online.view === 'code') {
+    let changed = false;
+    for (const t of inp.taps) {
+      const m = /^Key([A-Z])$/.exec(t);
+      if (m && LETTERS.includes(m[1])) { online.code[online.cur] = m[1]; online.cur = Math.min(3, online.cur + 1); changed = true; }
+      if (t === 'Backspace') { online.cur = Math.max(0, online.cur - (online.code[online.cur] === 'A' ? 1 : 0)); online.code[online.cur] = 'A'; changed = true; }
+    }
+    const L = LETTERS.length, idx = LETTERS.indexOf(online.code[online.cur]);
+    if (pad(BTN.UP)) { online.code[online.cur] = LETTERS[(idx + 1) % L]; changed = true; }
+    if (pad(BTN.DOWN)) { online.code[online.cur] = LETTERS[(idx + L - 1) % L]; changed = true; }
+    if (pad(BTN.RIGHT) || inp.taps.has('ArrowRight')) { online.cur = Math.min(3, online.cur + 1); changed = true; }
+    if (pad(BTN.LEFT) || inp.taps.has('ArrowLeft')) { online.cur = Math.max(0, online.cur - 1); changed = true; }
+    if (inp.confirmPressed) { connectTo(online.code.join('')); return; }
+    if (changed) renderOnline();
+  } else if (online.view === 'lobby' && inp.confirmPressed && net.isHost) hostStart();
+  // camera: same lodge view behind the panel
+  const t = performance.now() / 9000;
+  camera.position.set(LODGE.x + 14 + Math.sin(t) * 3, terrain.heightAt(LODGE.x, LODGE.z + 30) + 6, LODGE.z + 32);
+  camera.lookAt(LODGE.x, terrain.heightAt(LODGE.x, LODGE.z) + 3.5, LODGE.z + 4);
+  rider.updateVisual(dt, {});
+}
 
 // ---------- achievements ----------
 const achPanel = document.getElementById('ach-panel');
@@ -1004,6 +1114,7 @@ function updateLiftCamera() {
 }
 
 function showMenu() {
+  if (net.code) leaveOnline(false);
   game.mode = 'menu';
   comp = null; compHudEl.classList.add('hidden'); lodgeEl.classList.add('hidden'); lodgeHintEl.classList.add('hidden');
   showCash();
@@ -1151,6 +1262,7 @@ function tick(dt, now) {
     if (achOpen) achPanel.scrollTop += scrollY;
     else if (game.mode === 'menu') menuEl.scrollTop += scrollY;
     else if (game.mode === 'lodge') lodgeEl.scrollTop += scrollY;
+    else if (game.mode === 'online') onlineEl.scrollTop += scrollY;
   }
   if (game.mode === 'menu') {
     if (inp.leftPressed && game.sport === 'board') setStance(true);
@@ -1168,8 +1280,10 @@ function tick(dt, now) {
     updateHeliMode(dt, inp);
   } else if (game.mode === 'lodge') {
     updateLodge(dt, inp);
+  } else if (game.mode === 'online') {
+    updateOnline(dt, inp);
   } else if (game.mode === 'run') {
-    if (inp.restartPressed) { if (comp) enterComp(comp.id); else startRun(); }
+    if (inp.restartPressed) { if (comp && comp.online) backToRoom(); else if (comp) enterComp(comp.id); else startRun(); }
     else if (inp.menuPressed) showMenu();
     if (inp.pausePressed) game.paused = !game.paused;
     acc += game.paused ? 0 : dt;

@@ -1318,6 +1318,12 @@ export class Rider {
   }
 
   // ---------------- visuals ----------------
+  // another player's rider: its root position and rotation come over the network; just pose the body
+  renderRemote(dt) {
+    this.grab = null; this.phantomT = -1; this.flipVel = 0; this.spinVel = 0; this.pushAmt = 0; this.climbing = false;
+    this._updatePose(dt, {});
+  }
+
   updateVisual(dt, input) {
     const root = this.root;
     if (this.state === 'lift') {
