@@ -21,6 +21,7 @@ import { LONG_JUMP } from './terrain.js';
 import { YETI, PIPE } from './terrain.js';
 import { SKI_GRABS } from './rider.js';
 import { TreeLOD } from './trees.js';
+import { SbxRace } from './sbx.js';
 import { Sfx } from './sfx.js';
 import { Comps, COMPS, COMP_BY_ID, PRIZES, FINISH_PRIZE, ACH_PRIZE, fmtValue, ordinal, money } from './comps.js';
 
@@ -81,6 +82,7 @@ document.getElementById('map-wrap').appendChild(trailMap.canvas);
 const rider = new Rider(scene, terrain);
 const heli = new Helicopter(scene);
 const race = new Race(scene, terrain);
+const sbx = new SbxRace(scene, terrain);    // snowboard cross: you and 5 bots out of the start gate
 const longJump = new LongJump(terrain);
 // background music (original pop-punk): starts on the first click / key / controller press (browser rule)
 const music = new Music();
@@ -209,7 +211,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { sfx, treeLod, comps, enterComp: (id) => enterComp(id), openLodge: () => openLodge(), getComp: () => comp, music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
+window.__game = { sbx, sfx, treeLod, comps, enterComp: (id) => enterComp(id), openLodge: () => openLodge(), getComp: () => comp, music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -234,7 +236,7 @@ document.getElementById('btn-ski').onclick = () => setSport('ski');
 // Start a run at the top (or at `at`, e.g. the lift unload point).
 function startRun(at = null, yaw = 0) {
   game.mode = 'run';
-  comp = null; compHudEl.classList.add('hidden');
+  comp = null; compHudEl.classList.add('hidden'); sbx.stop();
   // drop keyboard focus from the menu (a focused button or the name box would eat the arrow keys)
   if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
   race.reset(); raceHudEl.classList.add('hidden');
@@ -422,6 +424,7 @@ function updateJumpHud() {
   } else if (race.state !== 'running') raceHudEl.classList.add('hidden');
 }
 
+const escapeHtml = (t) => String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 // ---------- competitions (sign up at the Base Lodge) ----------
 const compHudEl = document.getElementById('comp-hud');
 const balanceEl = document.getElementById('balance'), balDot = document.getElementById('bal-dot');
@@ -439,6 +442,7 @@ function compStart(id) {
   let x, z, yaw;
   if (id === 'pipe') { const P = terrain.pipe; x = P.ox - P.ax * 14; z = P.oz - P.az * 14; yaw = yawAlong(P.ax, P.az); }
   else if (id === 'park') { const a = parkRun.at(PARK_START_S - 14); x = a.x; z = a.z; yaw = yawAlong(a.tx, a.tz); }
+  else if (id === 'sbx') { const p = terrain.sbx.point(2, 0); x = p.x; z = p.z; const d = terrain.sbx.dirAt(2); yaw = yawAlong(d.x, d.z); }
   else if (id === 'jump') { const J = terrain.jump; x = J.ox + J.ax * 3; z = J.oz + J.az * 3; yaw = yawAlong(J.ax, J.az); }
   else { const a = race.line(race.startS - 14); x = a.x; z = a.z; yaw = yawAlong(a.tx, a.tz); }
   return { pos: new THREE.Vector3(x, terrain.heightAt(x, z), z), yaw };
@@ -451,14 +455,19 @@ function enterComp(id) {
   rider.vel.set(Math.sin(st.yaw), 0, -Math.cos(st.yaw)).multiplyScalar(1.5);
   game.holdJump = true;
   comp = { id, state: 'ready', score: 0, stillT: 0, offT: 0 };
+  if (id === 'sbx') {
+    const lane = sbx.start({ rider, name: racerName() });
+    rider.reset(lane.pos.clone(), lane.yaw); rider.vel.set(0, 0, 0); chase.snap(rider);
+  }
   raceResultEl.classList.add('hidden'); raceResultT = 0;
   hud.popup(`${c.icon} ${c.name} competition`, 0);
 }
 
-function finishComp(value, why = null) {
+function finishComp(value, why = null, livePlace = null) {
   const c = COMP_BY_ID[comp.id];
   comp.state = 'done';
-  const r = comps.finish(comp.id, value, racerName(), game.sport);
+  const r = comps.finish(comp.id, value, racerName(), game.sport, livePlace);
+  if (comp.id === 'sbx' && value !== null) { ach.unlock('sbx_finish'); if (livePlace === 1) ach.unlock('sbx_win'); }
   const mine = value === null ? null : { value, name: racerName(), sport: game.sport };
   const medal = r.place === 1 ? '🥇' : r.place === 2 ? '🥈' : r.place === 3 ? '🥉' : c.icon;
   let html = value === null
@@ -466,7 +475,12 @@ function finishComp(value, why = null) {
     : `<h2>${medal} ${ordinal(r.place)} place · ${fmtValue(c, value)}</h2>` +
       `<div class="pr">+${money(r.prize)} prize money · wallet ${money(comps.cash)}</div>` +
       `<div class="${r.pb ? 'pr' : 'muted'}">${r.pb ? (r.prev === null ? 'Your first result in this event!' : `Personal best! (was ${fmtValue(c, r.prev)})`) : `Your best: ${fmtValue(c, comps.data.best[comp.id].value)}`}</div>`;
-  html += `<div class="panel-title" style="margin-top:10px">${c.name} standings</div>${comps.boardHtml(comp.id, mine)}` +
+  if (comp.id === 'sbx') {
+    // this race's finishing order (riders still on course get an estimated time)
+    html += '<div class="panel-title" style="margin-top:10px">This race</div><table class="race-board">' + sbx.results().map((e, i) =>
+      `<tr class="${e.kind === 'you' ? 'me' : ''}"><td>${i + 1}</td><td>${e.kind === 'you' ? `${escapeHtml(e.name)} (you)` : escapeHtml(e.name)}</td><td>${fmtValue(c, e.time)}${e.est ? ' *' : ''}</td><td>${i < PRIZES.length ? money(PRIZES[i]) : ''}</td></tr>`).join('') + '</table><div class="muted">* still racing (estimated)</div>';
+    html += `<div class="muted">${input.padName ? 'Menu button' : 'R'}: race again · ${input.padName ? 'View' : 'Esc'}: menu</div>`;
+  } else html += `<div class="panel-title" style="margin-top:10px">${c.name} standings</div>${comps.boardHtml(comp.id, mine)}` +
     `<div class="muted">${input.padName ? 'Menu button' : 'R'}: try again · ${input.padName ? 'View' : 'Esc'}: menu (pick another event at the lodge)</div>`;
   raceResultEl.innerHTML = html;
   raceResultEl.classList.remove('hidden'); raceResultT = 14;
@@ -508,6 +522,24 @@ function updateComp(dt) {
       if (w && w.u > LONG_JUMP.edgeU + 8 && onSnow) { finishComp(null, 'Rolled past the lip without jumping'); return; }
       line = 'Tuck (↓) down the inrun, jump at the blue lip, hold ↑ in the air';
     } else line = 'Fly! Hold ↑, then land it on the hill';
+  } else if (comp.id === 'sbx') {
+    for (const ev of sbx.update(dt)) {
+      if (ev.type === 'count') { hud.popup(`<span class="count">${ev.n}</span>`, 0); sfx.click(); }
+      else if (ev.type === 'go') { hud.popup('GO!', 0); comp.state = 'live'; sfx.takeoff(8); }
+      else if (ev.type === 'finish' && ev.slot.kind === 'you') { finishComp(ev.slot.finish, null, ev.slot.place); return; }
+      else if (ev.type === 'dnf') { finishComp(null, ev.why); return; }
+      else if (ev.type === 'shove') {
+        if (ev.from.kind === 'you') hud.popup(ev.down ? `💥 Shoved ${escapeHtml(ev.to.name)} over!` : `Shoved ${escapeHtml(ev.to.name)}`, 0);
+        else if (ev.to.kind === 'you') { hud.popup(`${escapeHtml(ev.from.name)} shoved you!`, 0, true); chase.shake = 0.5; }
+        if (ev.from.kind === 'you' || ev.to.kind === 'you') sfx.hit();
+      }
+    }
+    const shoveKey = input.padName ? 'X' : 'A';
+    if (sbx.state === 'gate') line = `Get ready… the gates drop on GO · ${shoveKey} shoves whoever's beside you`;
+    else {
+      const me = sbx.you, pos = sbx.position(me), ahead = sbx.order()[0];
+      line = `Position ${pos} / ${sbx.slots.length} · ${(sbx.t).toFixed(1)} s${pos > 1 ? ` · leader ${ahead.name}` : ' · you lead!'}${me.offT > 0.5 ? ' · GET BACK ON COURSE!' : ` · ${shoveKey} to shove`}`;
+    }
   } else if (comp.id === 'race') {
     if (comp.state === 'ready') {
       const a = race.startLine;
@@ -1147,11 +1179,14 @@ function tick(dt, now) {
     if (game.holdJump && !inp.jump) game.holdJump = false;
     const stepInp = looking ? { ...inp, steer: 0, up: false, down: false, jump: false } : game.holdJump ? { ...inp, jump: false } : inp;
     updateFreeLook(dt, inp, looking);
+    const sbxOn = comp && comp.id === 'sbx' && sbx.state !== 'idle';
     while (acc >= STEP) {
       prevPos.copy(rider.pos);
-      rider.step(STEP, stepInp);
+      if (sbxOn && sbx.state === 'gate') sbx.hold(); else rider.step(STEP, stepInp);
+      if (sbxOn) sbx.stepBots(STEP);
       acc -= STEP;
     }
+    if (sbxOn) sbx.updateVisuals(dt); else rider.wantShove = false;   // (shoving only means something in a race)
     handleEvents();
     if (!game.started && rider.speed > 0.5) game.started = true;
     if (game.started && !game.paused) game.time += dt;

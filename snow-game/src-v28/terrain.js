@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { fbm, noise2, rng, smoothstep } from './noise.js';
 import { tex } from './art.js';
+import { SbxCourse } from './sbxcourse.js';
 import { makeRuns, DIFF, RUN_STEP } from './runs.js';
 
 export const CELL = 3;                     // grid spacing (m)
@@ -168,6 +169,7 @@ export class Terrain {
     this._buildPark();
     this._buildFeatures();
     this._buildJumpMesh();
+    this.sbx.buildArt(this.scene);
     this._buildLogs();
     this._buildYeti();
     this._buildTrees();
@@ -296,6 +298,7 @@ export class Terrain {
     for (const b of this.snowRocks || []) if (Math.hypot(x - b.x, z - b.z) < b.r * 2.6 + 2 + margin) return true;
     if (this.jump) { const J = this.jump, dx = x - J.ox, dz = z - J.oz, u = dx * J.ax + dz * J.az, l = dx * J.cx + dz * J.cz;
       if (u > -10 && u < J.L + 5 && Math.abs(l) < this.jumpHW(Math.max(0, u)) + this.jumpBW(u) + 4 + margin) return true; }
+    if (this.sbx && this.sbx.near(x, z, 4 + margin)) return true;
     return false;
   }
 
@@ -399,6 +402,8 @@ export class Terrain {
       run.naturalJumps = (run.naturalJumps || []).concat(s0);
     }
     this._carveJump();
+    this.sbx = new SbxCourse(this);
+    this._carveSbx();
   }
 
   // ---------- the long jump ----------
@@ -413,6 +418,21 @@ export class Terrain {
   }
   jumpHW(u) { return u < 118 ? 3.6 : 3.6 + 10.4 * smoothstep(118, 135, u) + 4 * smoothstep(200, 260, u); }
   jumpBW(u) { return 7 + 16 * smoothstep(110, 150, u); }     // width of the bank that blends the hill into the snow
+
+  // press the snowboard cross course into the grid (coarse; exact shape is in heightAt) and mark it groomed
+  _carveSbx() {
+    const W = this.cols + 1, C = this.sbx;
+    for (let j = 0; j <= this.rows; j++) for (let i = 0; i <= this.cols; i++) {
+      const x = this.x0 + i * CELL, z = this.z0 - j * CELL;
+      if (z < 100 || z > 620 || x > -60) continue;
+      const w = C.weight(x, z);
+      if (!w) continue;
+      const q = j * W + i;
+      // (sit the plain snow a little below the course so the course's own groomed surface always shows on top)
+      this.H[q] += (w.h - 0.7 * w.k - this.H[q]) * w.k;
+      this.groom[q] = Math.max(this.groom[q], w.k);
+    }
+  }
 
   _carveJump() {
     const [ax0, az0] = LONG_JUMP.a, [bx0, bz0] = LONG_JUMP.b;
@@ -566,6 +586,7 @@ export class Terrain {
   heightAt(x, z) {
     let h = this.terrainHeight(x, z) + this.bumpAt(x, z);
     if (this.jump) { const w = this.jumpWeight(x, z); if (w) h += (w.h - h) * w.k; }
+    if (this.sbx) { const w = this.sbx.weight(x, z); if (w) h += (w.h - h) * w.k; }
     for (const k of this.kickers) {
       const dx = x - k.x, dz = z - k.z;
       if (dx * dx + dz * dz > 150) continue;
@@ -1046,6 +1067,7 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
     this.snowRocks = [];
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x5f5b58, flatShading: true, roughness: 1 });
     for (const [x, z, r, H] of SNOW_ROCKS) {
+      if (this.sbx && this.sbx.near(x, z, r * 3)) continue;     // keep the snowboard cross course clear
       const n = this.normalAt(x, z);
       let dx = n.x, dz = n.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;   // downhill
       const b = { x, z, r, H, dx, dz, Lu: r * 2.2 };
@@ -1341,7 +1363,7 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
       spots.push([c.ax + c.ex * u + c.nx * v, c.az + c.ez * u + c.nz * v, 0.9 + r() * 1.5]);
     }
     // keep the long jump's inrun, table and landing hill clear of rocks
-    for (let k = spots.length - 1; k >= 0; k--) if (this.nearJump(spots[k][0], spots[k][1], 5 + spots[k][2])) spots.splice(k, 1);
+    for (let k = spots.length - 1; k >= 0; k--) if (this.nearJump(spots[k][0], spots[k][1], 5 + spots[k][2]) || this.sbx.near(spots[k][0], spots[k][1], 3 + spots[k][2])) spots.splice(k, 1);
     const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 1, map: tex('rock_face_03_diff_1k.jpg', { srgb: true, repeat: [0.6, 0.6] }), normalMap: tex('rock_face_03_nor_gl_1k.jpg', { repeat: [0.6, 0.6] }) });
     const im = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), mat, spots.length);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();

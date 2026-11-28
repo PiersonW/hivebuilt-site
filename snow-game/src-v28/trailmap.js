@@ -89,6 +89,13 @@ export class TrailMap {
       const [mx, my] = this.toMap(P.ox + P.ax * P.L / 2 + P.cx * 22, P.oz + P.az * P.L / 2 + P.cz * 22);
       this._label(g, 'HALFPIPE', mx, my, '#163566', 'center', 10);
     }
+    if (T.sbx) {
+      const C = T.sbx; g.strokeStyle = '#ff7a1a'; g.lineWidth = 4; g.beginPath();
+      for (let s = 0; s <= C.finishS; s += 8) { const i = Math.round(s / 0.5), [x, y] = this.toMap(C.px[i], C.pz[i]); s ? g.lineTo(x, y) : g.moveTo(x, y); }
+      g.stroke();
+      const [lx, ly] = this.toMap(C.px[0] - 30, C.pz[0]);
+      this._label(g, 'SNOWBOARD CROSS', lx, ly, '#c2410c', 'right', 11);
+    }
     if (mk.jump) {
       const [[ax, az], [bx, bz], [ex, ez]] = mk.jump;
       const [x1, y1] = this.toMap(ax, az), [x2, y2] = this.toMap(bx, bz), [x3, y3] = this.toMap(ex, ez);

@@ -11,6 +11,8 @@ export const COMPS = [
     desc: 'One run through The Yard, from the top banner to the finish line above the halfpipe. Hit the jumps and rails; landed tricks score.' },
   { id: 'jump', name: 'Long Jump', icon: '🎿', unit: 'm', low: false,
     desc: 'One jump off the backside ski-jump hill. Tuck (↓) down the inrun, jump at the blue lip, hold ↑ in the air. Land it on the hill.' },
+  { id: 'sbx', name: 'Snowboard Cross', icon: '🏂', unit: 'time', low: true, live: true,
+    desc: 'Six riders out of the start gate at once, down the banked turns, rollers and jumps of the backside course. First to the finish wins.' },
   { id: 'race', name: 'Downhill Race', icon: '🏁', unit: 'time', low: true,
     desc: 'One run through every gate on the Race Course. Fastest time wins; each missed gate adds 2 seconds.' },
 ];
@@ -27,12 +29,13 @@ const BOTS = [
   ['Maya L.', 'board'], ['Jonas B.', 'ski'], ['Kai M.', 'board'], ['Sofia R.', 'ski'], ['Theo P.', 'board'],
   ['Ava C.', 'ski'], ['Leo S.', 'board'], ['Nora K.', 'ski'], ['Finn D.', 'board'], ['Ruby T.', 'ski'],
 ];
-const ORDER = { pipe: [0, 2, 4, 1, 6, 8, 3, 5, 9, 7], park: [2, 0, 6, 4, 1, 3, 8, 5, 7, 9], jump: [1, 3, 5, 0, 7, 2, 9, 4, 6, 8], race: [3, 1, 0, 5, 2, 7, 4, 9, 6, 8] };
+const ORDER = { sbx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], pipe: [0, 2, 4, 1, 6, 8, 3, 5, 9, 7], park: [2, 0, 6, 4, 1, 3, 8, 5, 7, 9], jump: [1, 3, 5, 0, 7, 2, 9, 4, 6, 8], race: [3, 1, 0, 5, 2, 7, 4, 9, 6, 8] };
 const VALUES = {
   pipe: [16800, 14200, 12100, 10400, 8900, 7300, 5900, 4600, 3300, 2100],
   park: [28500, 24000, 20500, 17200, 14400, 11800, 9300, 7100, 5000, 3000],
   jump: [141.5, 134, 127.5, 121, 114.5, 106, 98.5, 89, 78.5, 66],
   race: [48.62, 49.85, 51.1, 52.47, 53.9, 55.36, 57.21, 59.48, 62.05, 66.9],
+  sbx: [40.2, 40.9, 41.5, 42.1, 42.8, 43.6, 44.5, 45.6, 46.8, 48.5],     // course record board (the race itself is against live bots)
 };
 export function fieldFor(id) {
   return VALUES[id].map((v, i) => { const [name, sport] = BOTS[ORDER[id][i]]; return { name, sport, value: v, bot: true }; });
@@ -79,11 +82,11 @@ export class Comps {
   }
 
   // Record a finished run (value null = did not finish). Returns { place, prize, pb, prev }.
-  finish(id, value, name, sport) {
+  finish(id, value, name, sport, livePlace = null) {
     this.data.entries++;
     if (value === null) { this._save(); return { place: null, prize: 0, pb: false }; }
     const comp = COMP_BY_ID[id];
-    const place = this.placeOf(id, value);
+    const place = livePlace || this.placeOf(id, value);
     const prize = place <= PRIZES.length ? PRIZES[place - 1] : FINISH_PRIZE;
     const prev = this.data.best[id] ? this.data.best[id].value : null;
     const pb = prev === null || better(comp, value, prev);

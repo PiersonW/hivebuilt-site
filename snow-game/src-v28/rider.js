@@ -421,6 +421,14 @@ export class Rider {
       const k = Math.max(vp, inrun ? Math.min(1, this.crouch * 1.3) : 0);
       for (let i = 0; i < 2; i++) t[i].lerp(hipC.clone().add(new THREE.Vector3((i === 0 ? 1 : -1) * 0.24, 0.02, -0.32)), k);
     }
+    if (this.shoveT > 0 && this.shoveDir) {
+      // both arms thrust out toward whoever you're shoving
+      const k = Math.sin(Math.PI * (1 - this.shoveT / 0.35));
+      const inv = this.root.quaternion.clone().invert(), binv = this.body.quaternion.clone().invert();
+      const loc = this.shoveDir.clone().applyQuaternion(inv).applyQuaternion(binv); loc.y = 0; loc.normalize();
+      for (let i = 0; i < 2; i++) t[i].lerp(sh[i].clone().addScaledVector(loc, 0.6).add(new THREE.Vector3(0, -0.05, 0)), k);
+      this.shoveT = Math.max(0, this.shoveT - dt);
+    }
     if (phantom) { t[0] = sh[0].clone().add(new THREE.Vector3(0.3, 0.5, 0.1)); t[1] = sh[1].clone().add(new THREE.Vector3(-0.3, 0.5, 0.1)); }
     if (this.state === 'fly' && this.chute) {   // hands up on the steering toggles
       const pull = this.flyBank || 0;
@@ -567,6 +575,9 @@ export class Rider {
       const g = Math.hypot(n.x, n.z) / Math.max(0.2, n.y);
       if (g > 0.13) { this.climbing = true; this.climbYaw = Math.atan2(-n.x, n.z); this.climbPhase = 0; this.vel.set(0, 0, 0); return; }
     }
+    // a grab button while riding = shove whoever's next to you (used in snowboard cross)
+    if (input.grab && !this._shoveHeld) this.wantShove = true;
+    this._shoveHeld = !!input.grab;
     const tuck = input.down && !input.jump;
     const brake = input.brake;
     // hold up when slow: push yourself along (back foot out on the board, poles for skiers)

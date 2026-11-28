@@ -46,6 +46,9 @@ export const ACHIEVEMENTS = [
   { id: 'race_clean', icon: '🚩', name: 'Clean Run', desc: 'Finish a race without missing a gate.', group: 'Racing' },
   { id: 'race_pr', icon: '📈', name: 'Personal Best', desc: 'Beat your own best race time.', group: 'Racing' },
   { id: 'race_fast', icon: '🥇', name: 'Gold Medal Pace', desc: 'Finish a clean race in under 50 seconds.', group: 'Racing' },
+  // snowboard cross
+  { id: 'sbx_finish', icon: '🏂', name: 'Gate Crasher', desc: 'Finish a snowboard cross race.', group: 'Racing' },
+  { id: 'sbx_win', icon: '🥇', name: 'Cross Champion', desc: 'Win a snowboard cross race.', group: 'Racing' },
   // long jump
   { id: 'jump_land', icon: '🎿', name: 'Ski Jumper', desc: 'Land the long jump on the landing hill.', group: 'Racing' },
   { id: 'jump_k', icon: '🎯', name: 'K-Point', desc: 'Land the long jump at 100 m or more.', group: 'Racing' },
