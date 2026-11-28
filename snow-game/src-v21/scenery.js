@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { fbm, ridged, smoothstep, rng } from './noise.js';
 import { WORLD, BASE_Z } from './terrain.js';
+import { tex, SKY_PHOTO } from './art.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
 // Physical sky + matching image-based lighting. Returns the sun direction.
 export function setupSky(scene, renderer, { elevation = 28, azimuth = 215 } = {}) {
@@ -23,7 +25,29 @@ export function setupSky(scene, renderer, { elevation = 28, azimuth = 215 } = {}
   scene.environment = pmrem.fromScene(envScene, 0.02).texture;
   scene.environmentIntensity = 0.65;
   pmrem.dispose();
+  // then swap in the real sky photo (and light the scene with it) once it has downloaded
+  loadSkyPhoto(scene, renderer, sky, sun);
   return { sky, sun };
+}
+
+// The sky photo is turned so its sun sits where our sunlight comes from (photo's sun: 34° round, 48° up).
+const PHOTO_SUN_ANGLE = 0.595;
+export let SKY_ROT_SIGN = 1;
+function loadSkyPhoto(scene, renderer, sky, sun) {
+  new RGBELoader().load(SKY_PHOTO, (hdr) => {
+    hdr.mapping = THREE.EquirectangularReflectionMapping;
+    const rot = SKY_ROT_SIGN * (PHOTO_SUN_ANGLE - Math.atan2(sun.z, sun.x));
+    const pm = new THREE.PMREMGenerator(renderer);
+    scene.environment = pm.fromEquirectangular(hdr).texture;
+    pm.dispose();
+    scene.environmentIntensity = 1.5;
+    scene.background = hdr;
+    scene.backgroundIntensity = 0.9;
+    scene.backgroundRotation.set(0, rot, 0);
+    scene.environmentRotation.set(0, rot, 0);
+    sky.visible = false;
+    scene.userData.skyPhoto = hdr;
+  });
 }
 
 // A ring of big snowy peaks around the resort, blended into the edges of the play area.
@@ -84,13 +108,15 @@ export function buildRange(scene, terrain) {
 export function buildLodge(scene, terrain, x, z, yaw = 0) {
   const g = new THREE.Group();
   const y = terrain.terrainHeight(x, z);
-  const wood = new THREE.MeshStandardMaterial({ color: 0x7a4f2e, roughness: 0.8 });
-  const roofM = new THREE.MeshStandardMaterial({ color: 0x3b3f4a, roughness: 0.7 });
+  const plank = (rx, ry) => new THREE.MeshStandardMaterial({ color: new THREE.Color(2.6, 2.3, 2.0), roughness: 0.85, map: tex('weathered_brown_planks_diff_1k.jpg', { srgb: true, repeat: [rx, ry] }), normalMap: tex('weathered_brown_planks_nor_gl_1k.jpg', { repeat: [rx, ry] }) });
+  const wood = plank(1, 1);
+  const wallLong = plank(7, 1.6), wallEnd = plank(3.6, 1.6);
+  const roofM = new THREE.MeshStandardMaterial({ color: new THREE.Color(1.7, 1.7, 1.8), roughness: 0.8, map: tex('roof_slates_02_diff_1k.jpg', { srgb: true, repeat: [7, 2.5] }), normalMap: tex('roof_slates_02_nor_gl_1k.jpg', { repeat: [7, 2.5] }) });
   const snowM = new THREE.MeshStandardMaterial({ color: 0xf4f8fd, roughness: 0.9 });
   const glass = new THREE.MeshStandardMaterial({ color: 0xffd58a, emissive: 0xffb347, emissiveIntensity: 0.6 });
   const stone = new THREE.MeshStandardMaterial({ color: 0x8a8580, flatShading: true });
   const L = 26, D = 14, H = 6;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(L, H, D), wood); body.position.y = H / 2; g.add(body);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(L, H, D), [wallEnd, wallEnd, wood, wood, wallLong, wallLong]); body.position.y = H / 2; g.add(body);
   const base = new THREE.Mesh(new THREE.BoxGeometry(L + 0.6, 1.2, D + 0.6), stone); base.position.y = 0.6; g.add(base);
   // roof: two slabs
   for (const s of [-1, 1]) {
@@ -102,7 +128,7 @@ export function buildLodge(scene, terrain, x, z, yaw = 0) {
   // gable ends
   const gable = new THREE.Shape(); gable.moveTo(-D / 2, 0); gable.lineTo(D / 2, 0); gable.lineTo(0, 4.4); gable.closePath();
   for (const s of [-1, 1]) {
-    const m = new THREE.Mesh(new THREE.ShapeGeometry(gable), wood);
+    const m = new THREE.Mesh(new THREE.ShapeGeometry(gable), wallEnd);
     m.position.set(s * L / 2, H, 0); m.rotation.y = s * Math.PI / 2; g.add(m);
   }
   // windows along the front and back

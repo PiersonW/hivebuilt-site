@@ -2,6 +2,7 @@
 // forest, rocks, trail signs and finish gates at the base. Downhill is -z.
 import * as THREE from 'three';
 import { fbm, noise2, rng, smoothstep } from './noise.js';
+import { tex } from './art.js';
 import { makeRuns, DIFF, RUN_STEP } from './runs.js';
 
 export const CELL = 3;                     // grid spacing (m)
@@ -72,6 +73,11 @@ const CLIFFS = [
   [[-168, -1122], [-140, -1130], 5],
   // rock bands across the backside headwall (they face north, down into the bowl), with the chutes in the gaps
   [[-150, 84], [-52, 88], 6, true], [[-28, 88], [78, 90], 6, true], [[102, 90], [188, 88], 6, true], [[212, 88], [290, 84], 6, true],
+];
+// Tree models (assets/trees): natural height in model units, scale to use, far stand-in width per metre of height
+export const TREE_VARIANTS = [
+  { file: 'pine_1', h: 9.7, s: 0.8, w: 0.11 }, { file: 'pine_2', h: 6.86, s: 0.95, w: 0.12 }, { file: 'pine_3', h: 7.0, s: 0.95, w: 0.1 },
+  { file: 'pine_4', h: 6.82, s: 0.95, w: 0.12 }, { file: 'pine_5', h: 8.33, s: 0.9, w: 0.08 }, { file: 'dead_tree', h: 16.1, s: 0.5, w: 0.1 },
 ];
 // Snow-covered rocks that kick you into the air: [x, z, radius, height]
 const SNOW_ROCKS = [
@@ -718,44 +724,30 @@ export class Terrain {
   }
 
   // ---------- rendering ----------
-  _snowNormalMap() {
-    const S = 256, c = document.createElement('canvas'); c.width = c.height = S;
-    const g = c.getContext('2d'), img = g.createImageData(S, S);
-    const hgt = new Float32Array(S * S);
-    // tileable: blend four shifted copies of the noise
-    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-      const f = (u, v) => fbm(u, v, 4);
-      const u = x / S, v = y / S, A = 6;
-      const n00 = f(u * A, v * A), n10 = f((u - 1) * A, v * A), n01 = f(u * A, (v - 1) * A), n11 = f((u - 1) * A, (v - 1) * A);
-      hgt[y * S + x] = (n00 * (1 - u) + n10 * u) * (1 - v) + (n01 * (1 - u) + n11 * u) * v;
-    }
-    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-      const hx = hgt[y * S + ((x + 1) % S)] - hgt[y * S + ((x + S - 1) % S)];
-      const hy = hgt[((y + 1) % S) * S + x] - hgt[((y + S - 1) % S) * S + x];
-      const nx = -hx * 3, ny = -hy * 3, nz = 1, l = Math.hypot(nx, ny, nz), k = (y * S + x) * 4;
-      img.data[k] = (nx / l * 0.5 + 0.5) * 255; img.data[k + 1] = (ny / l * 0.5 + 0.5) * 255; img.data[k + 2] = (nz / l * 0.5 + 0.5) * 255; img.data[k + 3] = 255;
-    }
-    g.putImageData(img, 0, 0);
-    const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = 4;
-    return t;
-  }
-
   _buildMesh() {
     const { cols, rows } = this, W = cols + 1, H = this.H;
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0, normalMap: this._snowNormalMap(), normalScale: new THREE.Vector2(0.55, 0.55) });
+    // snow surface detail from a photo-scanned snow texture (one tile every 5 m: uv = world / 5)
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0,
+      normalMap: tex('snow_02_nor_gl_1k.jpg'), normalScale: new THREE.Vector2(0.7, 0.7), roughnessMap: tex('snow_02_rough_1k.jpg') });
+    this.rockTex = tex('rock_face_03_diff_1k.jpg', { srgb: true });
     this.material = mat;
     // baked shadows (filled in by _bakeShadows once the trees exist): a world-space map that tints shaded snow blue
     const blank = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat, THREE.UnsignedByteType); blank.needsUpdate = true;
-    this.bakedUniforms = { shadowTex: { value: blank }, shadowArea: { value: new THREE.Vector4(WORLD.x0, WORLD.zTop, 1, 1) } };
+    this.bakedUniforms = { shadowTex: { value: blank }, shadowArea: { value: new THREE.Vector4(WORLD.x0, WORLD.zTop, 1, 1) }, rockMap: { value: this.rockTex } };
     const U = this.bakedUniforms;
     mat.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, U);
-      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec4 shadowArea;\nvarying vec2 vBakedUv;\nattribute float groomed;\nvarying float vGroom;\nvarying vec3 vSnowW;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvec4 bwp = modelMatrix * vec4(transformed, 1.0);\nvBakedUv = vec2((bwp.x - shadowArea.x) / shadowArea.z, (shadowArea.y - bwp.z) / shadowArea.w);\nvGroom = groomed; vSnowW = bwp.xyz;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D shadowTex;\nvarying vec2 vBakedUv;\nvarying float vGroom;\nvarying vec3 vSnowW;')
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec4 shadowArea;\nvarying vec2 vBakedUv;\nattribute float groomed;\nvarying float vGroom;\nvarying vec3 vSnowW;\nattribute float rocky;\nvarying float vRocky;\nvarying vec3 vWN;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvec4 bwp = modelMatrix * vec4(transformed, 1.0);\nvBakedUv = vec2((bwp.x - shadowArea.x) / shadowArea.z, (shadowArea.y - bwp.z) / shadowArea.w);\nvGroom = groomed; vSnowW = bwp.xyz; vRocky = rocky; vWN = normalize(mat3(modelMatrix) * objectNormal);');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D shadowTex;\nuniform sampler2D rockMap;\nvarying vec2 vBakedUv;\nvarying float vGroom;\nvarying vec3 vSnowW;\nvarying float vRocky;\nvarying vec3 vWN;')
         .replace('#include <color_fragment>', `#include <color_fragment>
+// bare rock on the steep faces: a rock photo projected from three sides so cliffs don't look stretched
+if (vRocky > 0.01) {
+  vec3 bw = pow(abs(normalize(vWN)), vec3(4.0)); bw /= (bw.x + bw.y + bw.z);
+  vec3 P = vSnowW / 7.0;
+  vec3 rc = texture2D(rockMap, P.zy).rgb * bw.x + texture2D(rockMap, P.xz).rgb * bw.y + texture2D(rockMap, P.xy).rgb * bw.z;
+  diffuseColor.rgb = mix(diffuseColor.rgb, rc * 1.15, vRocky);
+}
 float baked = texture2D(shadowTex, vBakedUv).r;
 diffuseColor.rgb *= mix(vec3(1.0), vec3(0.34, 0.42, 0.64), baked);
 // fresh powder off the groomed runs: tiny crystals that glint as you move past (only up close)
@@ -766,7 +758,7 @@ float tw = fract(hsh * 17.0 + dot(toCam, vec3(3.1, 5.7, 2.3)) * 2.0);
 float glint = step(0.993, hsh) * step(0.55, tw) * (1.0 - vGroom) * smoothstep(45.0, 6.0, length(cameraPosition - vSnowW));
 diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
     };
-    mat.customProgramCacheKey = () => 'snow-baked-shadows';
+    mat.customProgramCacheKey = () => 'snow-baked-shadows-rock';
     // untracked powder is bright and soft; the groomed runs are a touch flatter and greyer (packed corduroy)
     const snow = new THREE.Color(0.97, 0.98, 1.0), powder = new THREE.Color(0.93, 0.955, 0.995), groomed = new THREE.Color(0.9, 0.915, 0.94);
     const rock = new THREE.Color(0.38, 0.36, 0.35), rockLight = new THREE.Color(0.55, 0.52, 0.49), c = new THREE.Color();
@@ -774,7 +766,7 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
     this.chunks = [];
     for (let cj = 0; cj < rows; cj += CH) for (let ci = 0; ci < cols; ci += CH) {
       const i1 = Math.min(cols, ci + CH), j1 = Math.min(rows, cj + CH), w = i1 - ci + 1, h = j1 - cj + 1;
-      const pos = new Float32Array(w * h * 3), nor = new Float32Array(w * h * 3), col = new Float32Array(w * h * 3), uv = new Float32Array(w * h * 2), grm = new Float32Array(w * h);
+      const pos = new Float32Array(w * h * 3), nor = new Float32Array(w * h * 3), col = new Float32Array(w * h * 3), uv = new Float32Array(w * h * 2), grm = new Float32Array(w * h), rky = new Float32Array(w * h);
       for (let j = cj; j <= j1; j++) for (let i = ci; i <= i1; i++) {
         const q = j * W + i, v = (j - cj) * w + (i - ci);
         const x = this.x0 + i * CELL, z = this.z0 - j * CELL;
@@ -790,7 +782,7 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
         c.copy(snow).lerp(powder, 0.5 + 0.5 * fbm(x / 60, z / 60, 2));
         c.lerp(groomed, this.groom[q] * 0.9);
         const rk = smoothstep(0.7, 1.15, g) * (1 - this.groom[q]);
-        if (rk > 0) c.lerp(rockLight.clone().lerp(rock, 0.5 + 0.5 * noise2(x / 7, z / 7)), rk);
+        rky[v] = rk;     // (the rock colour comes from the rock texture in the shader)
         col[v * 3] = c.r; col[v * 3 + 1] = c.g; col[v * 3 + 2] = c.b;
         uv[v * 2] = x / 5; uv[v * 2 + 1] = z / 5;
       }
@@ -805,6 +797,7 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
       geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
       geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
       geo.setAttribute('groomed', new THREE.BufferAttribute(grm, 1));
+      geo.setAttribute('rocky', new THREE.BufferAttribute(rky, 1));
       geo.setIndex(idx);
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, mat);
@@ -1150,8 +1143,8 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
     add(new THREE.CylinderGeometry(0.14, 0.22, 1.6, 5, 1, true), 0x5a3b26, 0.8);
     const tiers = [[1.9, 2.7, 2.1], [1.5, 2.4, 3.5], [1.05, 2.1, 4.8], [0.6, 1.5, 5.9]];
     for (const [r, h, y] of tiers) {
-      add(new THREE.ConeGeometry(r, h, 7, 1, true), 0x2c5e3f, y);
-      add(new THREE.ConeGeometry(r * 0.62, h * 0.42, 7, 1, true), 0xf2f6fb, y + h * 0.3);
+      add(new THREE.ConeGeometry(r, h, 7, 1, true), 0x2f5a40, y);
+      add(new THREE.ConeGeometry(r * 0.86, h * 0.62, 7, 1, true), 0xeef3fa, y + h * 0.22);   // snow-laden, like the close-up models
     }
     let total = 0; for (const p of parts) total += p.attributes.position.count;
     const pos = new Float32Array(total * 3), col = new Float32Array(total * 3);
@@ -1184,10 +1177,13 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
       if (Math.hypot(tx - YETI.x, tz - YETI.z) < 9) continue;
       if (this.rails.some(rl => distToSeg(tx, tz, rl.p0, rl.p1) < 6)) continue;
       if (lifts.some(([a, b]) => distToSeg(tx, tz, a, b) < 8)) continue;
-      const size = 0.75 + r() * 0.55 + 0.25 * smoothstep(300, 1200, s);
+      // every tree different: which model, how big, how tall and thin or short and wide
+      const v = r() < 0.035 ? 5 : Math.floor(r() * 5);
+      const size = 0.55 + Math.pow(r(), 1.4) * 1.3 + 0.2 * smoothstep(300, 1200, s);
+      const sy = size * (0.82 + r() * 0.4), sxz = size * (0.8 + r() * 0.4);
       const key = `${Math.floor((tx - this.x0) / 192)},${Math.floor((this.z0 - tz) / 192)}`;
       if (!byChunk.has(key)) byChunk.set(key, []);
-      byChunk.get(key).push([tx, tz, size, r() * 6.28, r()]);
+      byChunk.get(key).push([tx, tz, v, sxz, sy, r() * 6.28, r()]);
     }
     const geo = this._treeGeometry();
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.85 });
@@ -1196,14 +1192,18 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
     this.treeMeshes = [];
     for (const list of byChunk.values()) {
       const im = new THREE.InstancedMesh(geo, mat, list.length);
-      list.forEach(([x, z, size, rot, shade], i) => {
-        const y = this.terrainHeight(x, z) - 0.2;
+      list.forEach(([x, z, v, sxz, sy, rot, shade], i) => {
+        const y = this.terrainHeight(x, z) - 0.2, k = TREE_VARIANTS[v];
+        const h = k.h * k.s * sy;
         q.setFromAxisAngle(UPV, rot);
-        sc.set(size, size * (0.9 + shade * 0.25), size);
-        m.compose(p.set(x, y, z), q, sc); im.setMatrixAt(i, m);
+        // the detailed model (drawn near the camera, see trees.js) ...
+        const near = new THREE.Matrix4().compose(p.set(x, y, z), q, sc.set(sxz * k.s, sy * k.s, sxz * k.s));
+        // ... and the simple far-away stand-in, sized to match (dead trees are too thin to see far off)
+        const far = v === 5 ? new THREE.Matrix4().makeScale(0, 0, 0) : new THREE.Matrix4().compose(p.set(x, y, z), q, sc.set(h * k.w, h / 6.65, h * k.w));
+        im.setMatrixAt(i, far);
         tint.setHSL(0.33, 0.1 + shade * 0.2, 0.85 + shade * 0.3);
         im.setColorAt(i, tint);
-        this.trees.push({ x, z, y, r: 0.3 * size, h: 6.5 * size, kind: 'tree', mesh: im, i });
+        this.trees.push({ x, z, y, r: 0.3 * sxz, h, kind: 'tree', mesh: im, i, v, near, far });
       });
       im.castShadow = false; im.receiveShadow = true;
       im.computeBoundingSphere();
@@ -1271,7 +1271,7 @@ diffuseColor.rgb += glint * 0.9 * (1.0 - baked * 0.7);`);
     }
     // keep the long jump's inrun, table and landing hill clear of rocks
     for (let k = spots.length - 1; k >= 0; k--) if (this.nearJump(spots[k][0], spots[k][1], 5 + spots[k][2])) spots.splice(k, 1);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x6f6b68, flatShading: true, roughness: 1 });
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 1, map: tex('rock_face_03_diff_1k.jpg', { srgb: true, repeat: [0.6, 0.6] }), normalMap: tex('rock_face_03_nor_gl_1k.jpg', { repeat: [0.6, 0.6] }) });
     const im = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), mat, spots.length);
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
     spots.forEach(([x, z, sz], i) => {

@@ -20,6 +20,8 @@ import { Music } from './music.js';
 import { LONG_JUMP } from './terrain.js';
 import { YETI, PIPE } from './terrain.js';
 import { SKI_GRABS } from './rider.js';
+import { TreeLOD } from './trees.js';
+import { Sfx } from './sfx.js';
 import { Comps, COMPS, COMP_BY_ID, PRIZES, FINISH_PRIZE, ACH_PRIZE, fmtValue, ordinal, money } from './comps.js';
 
 // ---------- renderer / scene ----------
@@ -60,6 +62,8 @@ const LIFTS = [
 ];
 const terrain = new Terrain(scene, { sunDir: SUN_DIR, shadowRes: LOW_GFX ? 1.5 : 1.0, treeSpacing: LOW_GFX ? 12 : 9.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
 buildRange(scene, terrain);
+// detailed pine models for the trees near the camera
+const treeLod = new TreeLOD(scene, terrain, { radius: LOW_GFX ? 75 : 115 });
 buildLodge(scene, terrain, LODGE.x, LODGE.z);
 for (const dx of [-9.5, 0, 9.5]) terrain.addObstacle(-40 + dx, BASE_Z - 68, 6.5, 12, 'lodge');
 const lifts = LIFTS.map(l => new Chairlift(scene, terrain, l.bottom, l.top, { name: l.name, speed: l.speed }));
@@ -78,9 +82,16 @@ function showMusicState() { for (const b of musicBtns) b.classList.toggle('on', 
 function toggleMusic() { music.toggle(); showMusicState(); }
 for (const b of musicBtns) b.onclick = (e) => { e.stopPropagation(); toggleMusic(); };
 showMusicState();
-const kickMusic = () => music.start();
+// sound effects (own on/off: 🔊 button or B)
+const sfx = new Sfx();
+const sfxBtns = [document.getElementById('btn-sfx'), document.getElementById('btn-sfx-lift')];
+function showSfxState() { for (const b of sfxBtns) b.classList.toggle('on', sfx.enabled); }
+function toggleSfx() { sfx.toggle(); showSfxState(); }
+for (const b of sfxBtns) b.onclick = (e) => { e.stopPropagation(); toggleSfx(); };
+showSfxState();
+const kickMusic = () => { music.start(); sfx.start(); };
 window.addEventListener('pointerdown', kickMusic);
-window.addEventListener('keydown', (e) => { if (e.code !== 'KeyN') kickMusic(); });
+window.addEventListener('keydown', (e) => { if (e.code !== 'KeyN' && e.code !== 'KeyB') kickMusic(); });
 const ach = new Achievements(document.getElementById('ach-toast'));
 // competitions at the lodge, and the money you win (saved in this browser)
 const comps = new Comps();
@@ -191,7 +202,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { comps, enterComp: (id) => enterComp(id), openLodge: () => openLodge(), getComp: () => comp, music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
+window.__game = { sfx, treeLod, comps, enterComp: (id) => enterComp(id), openLodge: () => openLodge(), getComp: () => comp, music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -278,6 +289,7 @@ function updateHeliMode(dt, inp) {
     const f = new THREE.Vector3(Math.sin(heli.yaw), 0, -Math.cos(heli.yaw));
     const dir = d.out.clone().multiplyScalar(14).addScaledVector(f, heli.speed);
     heli.leave();
+    sfx.jumpOut();
     rider.startFlying(d.pos, Math.atan2(dir.x, -dir.z), Math.min(22, dir.length()));
     game.mode = 'run'; hud.show(true);
     chase.snap(rider);
@@ -956,18 +968,21 @@ function handleEvents() {
   for (const ev of rider.events) {
     if (ev.type === 'takeoff') {
       if (!ev.fromGrind || !tricks.active) { tricks.begin(); recorder.onTakeoff(); } onTakeoffAch(); longJump.takeoff(rider.pos, rider.speed);
+      sfx.takeoff(rider.speed);
       if (comp && comp.id === 'jump' && comp.state === 'ready' && longJump.armed) comp.state = 'live';
     }
     else if (ev.type === 'fly-land') {
       hud.popup('Wingsuit landing!', 0);
+      sfx.land(5, true);
       ach.unlock('wingsuit');
       if (ev.dist >= 800) ach.unlock('flight');
       emitPowder(30, rider.pos, rider.vel, 2.5);
     }
     else if (ev.type === 'fly-end') { /* flight over (landed or crashed) */ }
-    else if (ev.type === 'chute') hud.popup('🪂 Parachute!', 0);
-    else if (ev.type === 'grind-start') { if (!tricks.active) { tricks.begin(); recorder.onTakeoff(); } }
+    else if (ev.type === 'chute') { hud.popup('🪂 Parachute!', 0); sfx.chute(); }
+    else if (ev.type === 'grind-start') { if (!tricks.active) { tricks.begin(); recorder.onTakeoff(); } sfx.click(); }
     else if (ev.type === 'land') {
+      sfx.land(ev.impact, terrain.groomAt(rider.pos.x, rider.pos.z) < 0.3);
       const parts = tricks.active ? tricks.parts() : [];
       const res = tricks.finish(true, rider.airTime);
       onLandAch(res, parts, rider.airTime);
@@ -987,6 +1002,8 @@ function handleEvents() {
     } else if (ev.type === 'crash') {
       const res = tricks.finish(false, rider.airTime);
       if (/tree/i.test(ev.reason)) ach.addCount('trees', 1);
+      if (/tree|tower|lodge|yeti/i.test(ev.reason)) sfx.hit();
+      sfx.crash();
       if (longJump.armed) { longJump.crashed(); hud.popup('Fell on the long jump: no distance', 0, true); if (comp && comp.id === 'jump' && comp.state !== 'done') finishComp(null, 'Fell on the landing'); }
       airCtx = null;
       game.crashes++;
@@ -1038,6 +1055,7 @@ function tick(dt, now) {
   heli.update(dt);
   if (inp.padTaps.size) kickMusic();
   if (inp.taps.has('KeyN')) toggleMusic();
+  if (inp.taps.has('KeyB')) toggleSfx();
   if (achOpen) {
     // achievements panel is up: Esc / B / T / Y closes it, nothing else reacts
     if (inp.menuPressed || inp.taps.has('KeyT') || inp.padTaps.has(BTN.B) || inp.padTaps.has(BTN.Y)) toggleAch(false);
@@ -1198,6 +1216,18 @@ function tick(dt, now) {
   sun.position.copy(focus).add(SUN_OFFSET);
   sun.target.position.copy(focus);
 
+  treeLod.update(camera.position);
+  // sound effects follow what you're doing
+  const st = rider.state, onLiftNow = game.mode === 'lift' || game.mode === 'liftwait';
+  sfx.update(dt, {
+    mode: game.mode, paused: game.mode === 'run' && game.paused,
+    speed: onLiftNow ? 0 : rider.speed, onGround: st === 'ride' && !rider.climbing,
+    edge: Math.min(1, Math.abs(rider.lean || 0) * 1.4), skid: Math.min(1, rider.spray || 0),
+    powder: st === 'ride' ? 1 - Math.min(1, terrain.groomAt(rider.pos.x, rider.pos.z) / 0.3) : 0,
+    grinding: st === 'grind', flying: st === 'fly', chute: !!rider.chute,
+    lift: onLiftNow ? { seat: game.mode === 'lift' && chairIdx >= 0 ? curLift.seatPoint(chairIdx, -1) : null, towers: curLift.towers } : null,
+    heliDist: heli.group.visible ? camera.position.distanceTo(heli.group.position) : null,
+  });
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
