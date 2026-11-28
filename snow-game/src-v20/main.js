@@ -1,6 +1,6 @@
 // Game setup and main loop.
 import * as THREE from 'three';
-import { Terrain, BASE_Z, RIDGE_TOP, EXPRESS_TOP, LIFT_BOTTOMS, BACKSIDE_TOP } from './terrain.js';
+import { Terrain, BASE_Z, LODGE, RIDGE_TOP, EXPRESS_TOP, LIFT_BOTTOMS, BACKSIDE_TOP } from './terrain.js';
 import { setupSky, buildRange, buildLodge } from './scenery.js';
 import { Rider } from './rider.js';
 import { TrickTracker } from './tricks.js';
@@ -60,7 +60,6 @@ const LIFTS = [
 ];
 const terrain = new Terrain(scene, { sunDir: SUN_DIR, shadowRes: LOW_GFX ? 1.5 : 1.0, treeSpacing: LOW_GFX ? 12 : 9.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
 buildRange(scene, terrain);
-const LODGE = { x: -40, z: BASE_Z - 68 };
 buildLodge(scene, terrain, LODGE.x, LODGE.z);
 for (const dx of [-9.5, 0, 9.5]) terrain.addObstacle(-40 + dx, BASE_Z - 68, 6.5, 12, 'lodge');
 const lifts = LIFTS.map(l => new Chairlift(scene, terrain, l.bottom, l.top, { name: l.name, speed: l.speed }));
@@ -477,9 +476,12 @@ function updateLodgeDoor(inp) {
   const d = Math.hypot(rider.pos.x - LODGE_FRONT.x, rider.pos.z - LODGE_FRONT.z);
   const near = d < 45 && !comp;
   const atDoor = d < 11 && rider.state === 'ride' && rider.speed < 2.5 && !comp;
+  // ride right up to the front door (any speed) and you go straight in
+  const dx = rider.pos.x - LODGE.x, dz = rider.pos.z - LODGE.z;
+  if (!comp && rider.state === 'ride' && Math.abs(dx) < 6 && dz > 6 && dz < 10.5) { openLodge(); return; }
   if (near) {
     lodgeHintEl.innerHTML = atDoor ? `🏠 Base Lodge · <b>${input.padName ? 'A' : 'Enter'}</b> to sign up for competitions`
-      : '🏠 Base Lodge: stop at the front door to sign up for competitions';
+      : '🏠 Base Lodge: ride up to the front door to sign up for competitions';
     lodgeHintEl.classList.remove('hidden');
   } else lodgeHintEl.classList.add('hidden');
   if (atDoor && inp.confirmPressed) openLodge();

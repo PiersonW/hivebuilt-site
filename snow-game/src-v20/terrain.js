@@ -10,6 +10,7 @@ export const SUMMIT = { x: 50, z: 26 };    // top of the mountain / Summit Expre
 export const RIDGE_TOP = { x: -300, z: -612 };
 export const EXPRESS_TOP = { x: 86, z: 26 };    // Summit Express top station, right of the summit
 export const BASE_Z = -1370;               // top of the base area
+export const LODGE = { x: -40, z: BASE_Z - 68 };   // the Base Lodge (front door faces up the mountain, +z)
 export const LIFT_BOTTOMS = { express: { x: 140, z: -1404 }, ridge: { x: -262, z: -1404 }, backside: { x: 22, z: 588 } };
 export const BACKSIDE_TOP = { x: 2, z: 34 };    // Backside Lift top, on the ridge just west of the summit
 
@@ -135,6 +136,7 @@ const PADS = [
   { x: LIFT_BOTTOMS.ridge.x - 4, z: LIFT_BOTTOMS.ridge.z - 10, r: 30 },
   { x: LIFT_BOTTOMS.backside.x - 2, z: LIFT_BOTTOMS.backside.z + 8, r: 26 },   // bottom of the backside bowl
   { x: BACKSIDE_TOP.x + 4, z: BACKSIDE_TOP.z - 6, r: 16, level: 0 },   // level with the summit flat, so you roll across to the front runs
+  { x: LODGE.x, z: LODGE.z + 5, r: 30 },   // the lodge sits on a flat patch with a level plaza out front
 ];
 
 export class Terrain {

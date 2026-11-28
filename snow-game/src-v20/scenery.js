@@ -113,6 +113,18 @@ export function buildLodge(scene, terrain, x, z, yaw = 0) {
   }
   const door = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3, 0.1), new THREE.MeshStandardMaterial({ color: 0x3a2416 }));
   door.position.set(0, 1.5, D / 2 + 0.06); g.add(door);
+  // sign over the door
+  {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 128;
+    const x2 = c.getContext('2d');
+    x2.fillStyle = '#1f4fa8'; x2.fillRect(0, 0, 512, 128);
+    x2.strokeStyle = '#ffd23a'; x2.lineWidth = 8; x2.strokeRect(4, 4, 504, 120);
+    x2.fillStyle = '#fff'; x2.font = 'bold 50px Trebuchet MS, sans-serif'; x2.textAlign = 'center'; x2.textBaseline = 'middle';
+    x2.fillText('🏆 COMPETITIONS', 256, 50); x2.font = 'bold 26px Trebuchet MS, sans-serif'; x2.fillText('SIGN UP INSIDE', 256, 100);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(6, 1.5, 0.12), [wood, wood, wood, wood, new THREE.MeshStandardMaterial({ map: tex }), wood]);
+    sign.position.set(0, 4.3, D / 2 + 0.12); g.add(sign);
+  }
   const chimney = new THREE.Mesh(new THREE.BoxGeometry(1.6, 5, 1.6), stone); chimney.position.set(L / 2 - 4, H + 3.2, -2); g.add(chimney);
   g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   g.position.set(x, y, z); g.rotation.y = yaw;
