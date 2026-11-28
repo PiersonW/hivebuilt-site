@@ -10,6 +10,7 @@
 //   lift.chairState(i) -> { pos, dir, u }    // where a chair is; u = distance along the up line
 //   lift.seatPoint(i, side) -> Vector3       // a seat on chair i (side -1 = left, 1 = right)
 import * as THREE from 'three';
+import { loadLiftArt, towerMesh } from './liftart.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const HANG = 2.6;           // cable to seat
@@ -206,18 +207,19 @@ export class Chairlift {
     const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a36, flatShading: true });
     const yaw = Math.atan2(this.f.x, this.f.z);
 
-    // towers (skip the station ends)
+    // towers (skip the station ends); simple blocks until the tower model has loaded (see _useArt)
+    this._towerObjs = [];
     for (const t of this.towers.slice(1, -1)) {
       const gy = this.terrain.terrainHeight(t.x, t.z);
       const h = t.y - gy;
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, h, 6), steel);
-      pole.position.set(t.x, gy + h / 2, t.z); pole.castShadow = true; g.add(pole);
+      pole.position.set(t.x, gy + h / 2, t.z); pole.castShadow = true; g.add(pole); this._towerObjs.push(pole);
       const arm = new THREE.Mesh(new THREE.BoxGeometry(WHEEL_R * 2 + 1.2, 0.35, 0.5), paint);
-      arm.position.set(t.x, t.y + 0.25, t.z); arm.rotation.y = yaw; arm.castShadow = true; g.add(arm);
+      arm.position.set(t.x, t.y + 0.25, t.z); arm.rotation.y = yaw; arm.castShadow = true; g.add(arm); this._towerObjs.push(arm);
       for (const s of [-1, 1]) {
         const sheave = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 2.2), dark);
         sheave.position.copy(t).addScaledVector(this.p, s * WHEEL_R); sheave.position.y = t.y + 0.05;
-        sheave.rotation.y = yaw; g.add(sheave);
+        sheave.rotation.y = yaw; g.add(sheave); this._towerObjs.push(sheave);
       }
     }
     // stations: bull wheel, roof and a hut
@@ -271,12 +273,30 @@ export class Chairlift {
       const c = new THREE.Group();
       for (const [geo, pos, rot] of chairGeo) {
         const m = new THREE.Mesh(geo, geo === chairGeo[0][0] || geo === chairGeo[1][0] ? steel : paint);
-        m.position.copy(pos); if (rot) m.rotation.x = rot; m.castShadow = true; c.add(m);
+        m.position.copy(pos); if (rot) m.rotation.x = rot; m.castShadow = true; m.userData.chairPart = true; c.add(m);
       }
       g.add(c);
       this.chairs.push(c);
     }
     this._tmpP = new THREE.Vector3(); this._tmpD = new THREE.Vector3();
+    loadLiftArt().then(art => this._useArt(art)).catch(e => console.warn('lift models failed to load; keeping simple lift', e));
+  }
+
+  // Swap the simple towers and chairs for the real models.
+  _useArt(art) {
+    const g = this.group, yaw = Math.atan2(this.f.x, this.f.z);
+    for (const o of this._towerObjs) g.remove(o);
+    this._towerObjs = [];
+    for (const t of this.towers.slice(1, -1)) {
+      const m = towerMesh(art, this.terrain.terrainHeight(t.x, t.z), t.y, yaw);
+      m.position.x = t.x; m.position.z = t.z;
+      g.add(m); this._towerObjs.push(m);
+    }
+    for (const c of this.chairs) {
+      for (const o of [...c.children]) if (o.userData.chairPart) c.remove(o);    // (keep anyone sitting on it)
+      const m = new THREE.Mesh(art.chairGeo, art.chairMat); m.castShadow = true; m.userData.chairPart = true;
+      c.add(m);
+    }
   }
 
   // Chair parts in chair space: origin at the cable grip, forward = -z.

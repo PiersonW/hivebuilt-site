@@ -1,5 +1,6 @@
 // Rider: a simple primitive-built snowboarder plus the board physics.
 import * as THREE from 'three';
+import { SHAPES, buildBoard, buildSkis, dressRider, dressPole } from './ridermodel.js';
 
 const G = 9.81;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -114,35 +115,17 @@ export class Rider {
 
   // ---------------- model ----------------
   _buildModel() {
-    const flat = (c) => new THREE.MeshStandardMaterial({ color: c, flatShading: true, roughness: 0.75 });
-    this.mats = { jacket: flat(0xff6a2b), pants: flat(0x23324d), skin: flat(0xf0c39a), helmet: flat(0x1e8fd6), board: flat(0x1b1b22), boardTop: flat(0xffd23a), glove: flat(0x222222) };
-    const box = new THREE.BoxGeometry(1, 1, 1);
+    const soft = (c, rough = 0.7) => new THREE.MeshStandardMaterial({ color: c, roughness: rough });
+    this.mats = { jacket: soft(0xff6a2b, 0.65), pants: soft(0x23324d, 0.85), skin: soft(0xf0c39a, 0.6), helmet: soft(0x1e8fd6, 0.3),
+      board: soft(0x1b1b22, 0.5), boardTop: soft(0xffd23a), glove: soft(0x222222, 0.8), ski: soft(0x1e8fd6, 0.5), accent: soft(0x1d2230, 0.75),
+      lens: new THREE.MeshStandardMaterial({ color: 0xff9a3c, metalness: 0.9, roughness: 0.12, emissive: 0x3a1600 }) };
     const root = new THREE.Group();
     this.root = root;
 
-    // board (length along z, nose at -z)
-    this.boardG = new THREE.Group();
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(0.29, 0.04, 1.5), this.mats.board);
-    deck.position.y = 0.03;
-    const top = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.012, 1.3), this.mats.boardTop);
-    top.position.y = 0.056;
-    // turned-up nose and tail
-    const tip = new THREE.BoxGeometry(0.29, 0.04, 0.22);
-    const nose = new THREE.Mesh(tip, this.mats.board); nose.position.set(0, 0.07, -0.82); nose.rotation.x = 0.45;
-    const tail = new THREE.Mesh(tip, this.mats.board); tail.position.set(0, 0.07, 0.82); tail.rotation.x = -0.45;
-    for (const m of [deck, top, nose, tail]) { m.castShadow = true; this.boardG.add(m); }
+    // board (length along z, nose at -z) and skis (two, tips at -z), see ridermodel.js
+    this.boardG = buildBoard(this.mats);
     root.add(this.boardG);
-
-    // skis (two, along z, tips at -z) for the skier
-    this.skisG = new THREE.Group();
-    const skiMat = flat(0x1e8fd6), skiTop = flat(0xf4f4f4);
-    for (const sx of [-0.14, 0.14]) {
-      const ski = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 1.7), skiMat); ski.position.set(sx, 0.025, 0.05);
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.01, 1.4), skiTop); stripe.position.set(sx, 0.045, 0.05);
-      const tipS = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.2), skiMat); tipS.position.set(sx, 0.07, -0.86); tipS.rotation.x = 0.5;
-      const tailS = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.14), skiMat); tailS.position.set(sx, 0.05, 0.94); tailS.rotation.x = -0.35;
-      for (const m of [ski, stripe, tipS, tailS]) { m.castShadow = true; this.skisG.add(m); }
-    }
+    this.skisG = buildSkis(this.mats);
     this.skisG.visible = false;
     root.add(this.skisG);
     this.sport = 'board';
@@ -151,20 +134,24 @@ export class Rider {
     // body (faces +z in its own frame; rotated so it stands sideways on the board)
     this.body = new THREE.Group();
     root.add(this.body);
-    const mk = (mat, sxz = 1) => { const m = new THREE.Mesh(box, mat); m.castShadow = true; this.body.add(m); m.userData.sxz = sxz; return m; };
-    this.thighs = [mk(this.mats.pants), mk(this.mats.pants)];
-    this.shins = [mk(this.mats.pants), mk(this.mats.pants)];
-    this.boots = [mk(this.mats.glove), mk(this.mats.glove)];
-    this.torso = mk(this.mats.jacket);
-    this.upperArms = [mk(this.mats.jacket), mk(this.mats.jacket)];
-    this.foreArms = [mk(this.mats.jacket), mk(this.mats.jacket)];
-    this.hands = [mk(this.mats.glove), mk(this.mats.glove)];
-    this.head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.15, 0), this.mats.skin); this.head.castShadow = true; this.body.add(this.head);
-    this.helmet = new THREE.Mesh(new THREE.SphereGeometry(0.165, 7, 4, 0, Math.PI * 2, 0, Math.PI * 0.55), this.mats.helmet);
+    const mk = (geo, mat, sxz = 1) => { const m = new THREE.Mesh(geo, mat); m.castShadow = true; this.body.add(m); m.userData.sxz = sxz; return m; };
+    const S = SHAPES;
+    this.thighs = [mk(S.limb, this.mats.pants), mk(S.limb, this.mats.pants)];
+    this.shins = [mk(S.limb, this.mats.pants), mk(S.limb, this.mats.pants)];
+    this.boots = [mk(S.boot, this.mats.glove), mk(S.boot, this.mats.glove)];
+    this.torso = mk(S.torso, this.mats.jacket);
+    this.pelvis = mk(S.mitt, this.mats.pants); this.pelvis.scale.set(0.36, 0.2, 0.25);    // hips, so pants meet the jacket
+    this.upperArms = [mk(S.limb, this.mats.jacket), mk(S.limb, this.mats.jacket)];
+    this.foreArms = [mk(S.limb, this.mats.jacket), mk(S.limb, this.mats.jacket)];
+    this.hands = [mk(S.mitt, this.mats.glove), mk(S.mitt, this.mats.glove)];
+    this.head = new THREE.Mesh(S.head, this.mats.skin); this.head.castShadow = true; this.body.add(this.head);
+    this.helmet = new THREE.Mesh(new THREE.SphereGeometry(0.168, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.56), this.mats.helmet);
     this.helmet.castShadow = true; this.body.add(this.helmet);
-    this.goggles = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.06), flat(0x30e0c0)); this.body.add(this.goggles);
-    this.poles = [mk(flat(0x9aa3ad)), mk(flat(0x9aa3ad))];
-    for (const pl of this.poles) pl.visible = false;
+    this.goggles = new THREE.Mesh(new THREE.BufferGeometry(), this.mats.accent); this.body.add(this.goggles);
+    dressRider(this, this.mats);
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0xb8c0ca, metalness: 0.6, roughness: 0.35 });
+    this.poles = [mk(S.pole, poleMat), mk(S.pole, poleMat)];
+    for (const pl of this.poles) { pl.visible = false; dressPole(pl, this.mats); }
 
     this.handPos = [new THREE.Vector3(0.5, 0.9, 0.1), new THREE.Vector3(-0.5, 0.9, 0.1)];
     this.pose = { hipH: 0.92, lean: 0.15, boardLift: 0, boardRX: 0, boardRZ: 0, feetLift: 0 };
@@ -173,6 +160,8 @@ export class Rider {
 
   setStance(regular) {
     this.regular = regular;
+    // highbacks behind the heels (the toe edge is +x for regular riders)
+    for (const hb of this.boardG.userData.highbacks || []) { hb.position.x = regular ? -0.035 : 0.035; hb.rotation.y = regular ? 0 : Math.PI; }
     this._orientBody();
   }
 
@@ -292,7 +281,7 @@ export class Rider {
       if (climbing) {
         const a = 2 * Math.PI * cp;
         const st = [{ x: -0.1 * Math.sin(a + Math.PI), y: 0.1 * Math.max(0, Math.sin(a + Math.PI)) }, { x: 0.1 * Math.sin(a), y: 0.1 * Math.max(0, Math.sin(a)) }];
-        this.skisG.children.forEach((m, i) => { const k = i < 4 ? 0 : 1; m.position.set(this._skiBase[i].x + st[k].x, this._skiBase[i].y + st[k].y, this._skiBase[i].z); });
+        this.skisG.children.forEach((m, i) => { const k = i; m.position.set(this._skiBase[i].x + st[k].x, this._skiBase[i].y + st[k].y, this._skiBase[i].z); });
         bindings[0].x += st[0].x; bindings[0].y += st[0].y; bindings[1].x += st[1].x; bindings[1].y += st[1].y;
         this.skiStep = st;
       } else if (this.skiStep) this._resetSkiSteps();
@@ -330,8 +319,8 @@ export class Rider {
       const free = tw > 0.02 && i === pushLeg;
       if (free) pole.set(0, 0, 1).applyQuaternion(twR);              // knee points forward, not out the side
       const knee = ik(hip, foot, 0.46, 0.46, pole);
-      placeLimb(this.thighs[i], hip, knee, 0.15);
-      placeLimb(this.shins[i], knee, foot, 0.13);
+      placeLimb(this.thighs[i], hip, knee, 0.19);
+      placeLimb(this.shins[i], knee, foot, 0.165);
       this.boots[i].position.copy(foot).add(new THREE.Vector3(0, 0.03, 0.03));
       this.boots[i].scale.set(0.14, 0.1, 0.26);
       if (free) this.boots[i].quaternion.copy(twR); else this.boots[i].quaternion.identity();
@@ -340,6 +329,7 @@ export class Rider {
     const neck = hipC.clone().add(new THREE.Vector3(0, Math.cos(lean2) * 0.58, Math.sin(lean2) * 0.58));
     placeLimb(this.torso, hipC, neck, 0.34);
     this.torso.scale.z = 0.22;
+    this.pelvis.position.copy(hipC); this.pelvis.position.y -= 0.03; this.pelvis.quaternion.copy(this.torso.quaternion);
     const headDir = neck.clone().sub(hipC).normalize();
     this.head.position.copy(neck).addScaledVector(headDir, 0.16);
     this.helmet.position.copy(this.head.position).addScaledVector(headDir, 0.02);
@@ -467,8 +457,8 @@ export class Rider {
         if (this.handPos[i].distanceToSquared(t[i]) > 0.5) { this.handPos[i].copy(t[i]); this.handVel[i].set(0, 0, 0); }
       }
       const elbow = ik(sh[i], this.handPos[i], 0.33, 0.33, new THREE.Vector3(i === 0 ? 0.5 : -0.5, -0.6, -0.5));
-      placeLimb(this.upperArms[i], sh[i], elbow, 0.11);
-      placeLimb(this.foreArms[i], elbow, this.handPos[i], 0.1);
+      placeLimb(this.upperArms[i], sh[i], elbow, 0.13);
+      placeLimb(this.foreArms[i], elbow, this.handPos[i], 0.115);
       this.hands[i].position.copy(this.handPos[i]);
       this.hands[i].scale.set(0.1, 0.1, 0.1);
       if (ski) {   // pole runs from the hand down and back toward the snow
@@ -1093,10 +1083,11 @@ export class Rider {
       const side = i === 0 ? 1 : -1;
       const hip = hipC.clone().add(new THREE.Vector3(side * 0.12, 0, 0));
       const knee = hip.clone().lerp(feet[i], 0.5).add(new THREE.Vector3(0, 0, -0.03));
-      placeLimb(this.thighs[i], hip, knee, 0.15); placeLimb(this.shins[i], knee, feet[i], 0.13);
+      placeLimb(this.thighs[i], hip, knee, 0.19); placeLimb(this.shins[i], knee, feet[i], 0.165);
       this.boots[i].position.copy(feet[i]); this.boots[i].scale.set(0.14, 0.1, 0.26); this.boots[i].quaternion.identity();
     }
     placeLimb(this.torso, hipC, neck, 0.34); this.torso.scale.z = 0.22;
+    this.pelvis.position.copy(hipC); this.pelvis.position.y -= 0.03; this.pelvis.quaternion.copy(this.torso.quaternion);
     this.head.position.copy(neck).add(new THREE.Vector3(0, 0.16, 0.04));
     this.helmet.position.copy(this.head.position).add(new THREE.Vector3(0, 0.02, 0)); this.helmet.quaternion.identity();
     this.goggles.position.copy(this.head.position).add(new THREE.Vector3(0, 0.02, 0.13)); this.goggles.quaternion.identity();
@@ -1105,7 +1096,7 @@ export class Rider {
     const hands = [sh[0].clone().add(new THREE.Vector3(0.66, -0.18 + flap, -0.05)), sh[1].clone().add(new THREE.Vector3(-0.66, -0.18 - flap, -0.05))];
     for (let i = 0; i < 2; i++) {
       const elbow = sh[i].clone().lerp(hands[i], 0.5).add(new THREE.Vector3(0, 0.02, -0.04));
-      placeLimb(this.upperArms[i], sh[i], elbow, 0.11); placeLimb(this.foreArms[i], elbow, hands[i], 0.1);
+      placeLimb(this.upperArms[i], sh[i], elbow, 0.13); placeLimb(this.foreArms[i], elbow, hands[i], 0.115);
       this.hands[i].position.copy(hands[i]); this.hands[i].scale.set(0.1, 0.1, 0.1);
       this.handPos[i].copy(hands[i]);
       if (this.poles[i].visible) placeLimb(this.poles[i], hands[i], hands[i].clone().add(new THREE.Vector3(0, -0.9, -0.1)), 0.03);

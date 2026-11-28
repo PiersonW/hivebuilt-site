@@ -171,3 +171,5 @@ kbd { font-family: inherit; font-size: 10px; border: 1px solid rgba(255,255,255,
 .lodge-foot { display: flex; gap: 12px; align-items: center; justify-content: flex-end; flex-wrap: wrap; margin-top: auto; }
 #lodge-help { margin-right: auto; font-size: 13px; opacity: 0.85; }
 @media (max-width: 600px) { #lodge-panel { inset: 2%; padding: 12px; } #comp-hud, #lodge-hint { white-space: normal; width: 92%; } }
+
+.credits { font-size: 11px; opacity: 0.55; margin-top: 10px; }

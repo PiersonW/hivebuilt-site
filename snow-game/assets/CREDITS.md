@@ -1,6 +1,6 @@
 # Art credits
 
-All files here are **CC0** (public domain): free to use in anything, including commercial games, with no credit required. Listed here anyway so we know where each came from.
+Everything here is free to use. Most files are **CC0** (public domain): free to use in anything, including commercial games, with no credit required. Listed here anyway so we know where each came from.
 
 | File(s) | Poly Haven asset | Used for |
 | --- | --- | --- |
@@ -11,5 +11,9 @@ All files here are **CC0** (public domain): free to use in anything, including c
 | `textures/roof_slates_02_*` | [Roof Slates 02](https://polyhaven.com/a/roof_slates_02) | Lodge roof |
 
 Trees (`trees/`): low-poly pine and dead tree models by **Quaternius** (CC0), downloaded from [Poly Pizza](https://poly.pizza/u/Quaternius): Pine ([79gmlLnweB](https://poly.pizza/m/79gmlLnweB), [Zt62gceKXZ](https://poly.pizza/m/Zt62gceKXZ), [699sFuLCN2](https://poly.pizza/m/699sFuLCN2), [rfnxJv0Rqa](https://poly.pizza/m/rfnxJv0Rqa), [igSu0cPoBz](https://poly.pizza/m/igSu0cPoBz)) and Dead Tree ([CD4edbPSGm](https://poly.pizza/m/CD4edbPSGm)). Their shared bark and needle pictures are stored once in `trees/tex/` (bark shrunk to 512 px).
+
+Chairlift (`lift/`), **CC-BY 3.0, credit required** (shown on the game's menu):
+- `lift/quad_chair.glb`: "Chairlift" by **Poly by Google**, [poly.pizza/m/eZGTtPqn_Wd](https://poly.pizza/m/eZGTtPqn_Wd), licensed [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+- `lift/lift_tower.glb`: "Ski lift pole" by **Poly by Google**, [poly.pizza/m/1nMSE0mYj_C](https://poly.pizza/m/1nMSE0mYj_C), licensed [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/). In the game its pole is stretched to fit each tower and its cables are left out.
 
 Downloaded 2026-11-27.

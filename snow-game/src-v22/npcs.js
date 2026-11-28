@@ -2,6 +2,7 @@
 // Riders on the snow use the same Rider physics as you, driven by a simple "follow the run" brain.
 // When a chair with people on it reaches the top, they get off and ride down (if a rider is free).
 import * as THREE from 'three';
+import { SHAPES } from './ridermodel.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Rider } from './rider.js';
 
@@ -39,7 +40,7 @@ function seatedGeometry(look) {
     const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
     const dir = B.clone().sub(A), len = dir.length();
     const m = new THREE.Matrix4().compose(A.clone().addScaledVector(dir, 0.5), new THREE.Quaternion().setFromUnitVectors(UPV, dir.normalize()), new THREE.Vector3(w, len, d));
-    add(box, color, m);
+    add(SHAPES.limb, color, m);     // rounded, like the riders
   };
   const y0 = -HANG + 0.04;   // top of the seat
   for (const sx of [-0.1, 0.1]) {
@@ -51,12 +52,15 @@ function seatedGeometry(look) {
   for (const sx of [-1, 1]) {
     limb([sx * 0.2, y0 + 0.55, 0.2], [sx * 0.25, y0 + 0.3, 0.02], 0.11, look.jacket);       // upper arm
     limb([sx * 0.25, y0 + 0.3, 0.02], [sx * 0.2, y0 + 0.56, -0.4], 0.1, look.jacket);       // forearm up to the safety bar
-    add(box, 0x222222, new THREE.Matrix4().compose(new THREE.Vector3(sx * 0.2, y0 + 0.58, -0.42), new THREE.Quaternion(), new THREE.Vector3(0.1, 0.1, 0.1)));
+    add(SHAPES.mitt, 0x222222, new THREE.Matrix4().compose(new THREE.Vector3(sx * 0.2, y0 + 0.58, -0.42), new THREE.Quaternion(), new THREE.Vector3(0.11, 0.11, 0.11)));
   }
   const headP = new THREE.Vector3(0, y0 + 0.82, 0.2);
-  add(new THREE.IcosahedronGeometry(0.15, 0), 0xf0c39a, new THREE.Matrix4().makeTranslation(headP.x, headP.y, headP.z));
-  add(new THREE.SphereGeometry(0.165, 7, 4, 0, Math.PI * 2, 0, Math.PI * 0.55), look.helmet, new THREE.Matrix4().makeTranslation(headP.x, headP.y + 0.02, headP.z));
-  add(new THREE.BoxGeometry(0.22, 0.06, 0.06), 0x30e0c0, new THREE.Matrix4().makeTranslation(headP.x, headP.y + 0.02, headP.z - 0.13));
+  add(SHAPES.head, 0xf0c39a, new THREE.Matrix4().makeTranslation(headP.x, headP.y, headP.z));
+  add(new THREE.SphereGeometry(0.168, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.56), look.helmet, new THREE.Matrix4().makeTranslation(headP.x, headP.y + 0.02, headP.z));
+  // goggles (facing -z, the way the chair faces), neck gaiter and collar
+  add(new THREE.CylinderGeometry(0.174, 0.174, 0.07, 14, 1, true, Math.PI - 1.0, 2.0), 0xff9a3c, new THREE.Matrix4().makeTranslation(headP.x, headP.y + 0.02, headP.z));
+  add(new THREE.CylinderGeometry(0.128, 0.12, 0.13, 12), 0x1d2230, new THREE.Matrix4().makeTranslation(headP.x, headP.y - 0.075, headP.z));
+  add(new THREE.CylinderGeometry(0.13, 0.15, 0.05, 12), 0x1d2230, new THREE.Matrix4().makeTranslation(0, y0 + 0.62, 0.22));
   if (look.sport === 'board') {
     // board hangs off the front foot, resting across the footrest
     add(new THREE.BoxGeometry(1.5, 0.04, 0.29), look.board, new THREE.Matrix4().makeRotationZ(0.12).setPosition(0.3, y0 - 0.46, -0.5));
@@ -81,7 +85,7 @@ export class Npcs {
     // seated people: a few looks, shared between all chairs
     this.looks = Array.from({ length: 14 }, randomLook);
     this.seatGeos = this.looks.map(seatedGeometry);
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.8 });
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
     this.seats = [];   // per lift: per chair: { meshes: [left, right], up }
     for (const l of this.lifts) {
       const list = l.chairs.map((c) => {
@@ -134,7 +138,8 @@ export class Npcs {
     r.mats.pants.color.setHex(look.pants);
     r.mats.helmet.color.setHex(look.helmet);
     r.mats.board.color.setHex(look.board);
-    for (const m of r.skisG.children) if (m.geometry.parameters && m.geometry.parameters.depth > 1.5) m.material.color.setHex(look.board);
+    r.mats.boardTop.color.setHex(look.board).lerp(new THREE.Color(1, 1, 1), 0.55);   // tint the board's print
+    r.mats.ski.color.setHex(look.board);
   }
 
   // Start a rider somewhere on a run. at = a fraction of the way down (or null = the top of a run near `near`).
