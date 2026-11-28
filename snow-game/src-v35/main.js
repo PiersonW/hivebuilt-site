@@ -25,6 +25,7 @@ import { SbxRace } from './sbx.js';
 import { Net, newCode, LETTERS, MAX_PLAYERS } from './net.js';
 import { RideTogether } from './ride.js';
 import { Sfx } from './sfx.js';
+import { IS_TOUCH, TouchControls } from './touch.js';
 import { Comps, COMPS, COMP_BY_ID, PRIZES, FINISH_PRIZE, ACH_PRIZE, fmtValue, ordinal, money } from './comps.js';
 
 // ---------- renderer / scene ----------
@@ -32,7 +33,7 @@ const canvas = document.getElementById('game');
 // Xbox (Edge on the console): lighter graphics so it stays smooth. ?gfx=high / ?gfx=low override.
 const IS_XBOX = /Xbox/i.test(navigator.userAgent || '');
 const gfxParam = new URLSearchParams(location.search).get('gfx');
-const LOW_GFX = gfxParam ? gfxParam === 'low' : IS_XBOX;
+const LOW_GFX = gfxParam ? gfxParam === 'low' : IS_XBOX || IS_TOUCH;     // phones too
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !LOW_GFX });
 renderer.setPixelRatio(LOW_GFX ? 1 : Math.min(2, window.devicePixelRatio));
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -125,6 +126,7 @@ const recorder = new Recorder();
 const replayer = new Replayer(ghost);
 const tricks = new TrickTracker();
 const input = new Input();
+const touch = IS_TOUCH ? new TouchControls(input) : null;
 const chase = new ChaseCam(camera, terrain);
 const hud = new Hud();
 
@@ -724,10 +726,18 @@ function renderOnline() {
     return;
   }
   if (online.view === 'code') {
-    onlineBody.innerHTML = `<div class="comp-desc">Type the 4-letter code from whoever is hosting the race.</div>` +
-      `<div class="room-code">${online.code.map((ch, i) => `<span class="${i === online.cur ? 'cur' : ''}">${ch}</span>`).join('')}</div>` +
+    onlineBody.innerHTML = `<div class="comp-desc">Type the 4-letter code from whoever is hosting${rideKind ? '' : ' the race'}.</div>` +
+      (IS_TOUCH ? `<input id="code-input" class="code-input" maxlength="4" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" value="${online.code.join('') === 'AAAA' ? '' : online.code.join('')}">`
+        : `<div class="room-code">${online.code.map((ch, i) => `<span class="${i === online.cur ? 'cur' : ''}">${ch}</span>`).join('')}</div>`) +
       (online.msg ? `<div class="pr">${escapeHtml(online.msg)}</div>` : '');
+    const ci = document.getElementById('code-input');
+    if (ci) {
+      ci.oninput = () => { const v = ci.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); if (ci.value !== v) ci.value = v; online.code = v.padEnd(4, 'A').split(''); };
+      ci.onkeydown = (e) => { if (e.key === 'Enter' && ci.value.length === 4) { e.preventDefault(); connectTo(ci.value.toUpperCase()); } };
+      setTimeout(() => ci.focus(), 50);
+    }
     go.textContent = 'Join'; go.classList.remove('hidden');
+    if (IS_TOUCH) { help.textContent = ''; return; }
     help.innerHTML = usePad ? '🎮 D-pad ↑ ↓ change letter · ← → move · <b>A</b> join · <b>B</b> back' : 'Type the letters · <b>Enter</b> join · <b>Esc</b> back';
   } else if (online.view === 'connecting') {
     onlineBody.innerHTML = '<div class="comp-desc">Connecting…</div>'; go.classList.add('hidden'); help.textContent = '';
@@ -1192,6 +1202,8 @@ function updateReplayBar() {
 document.getElementById('btn-skip').onclick = () => skipLift();
 // show / hide the trail map and the highlights panel (remembered between visits)
 const panelPref = (() => { try { return JSON.parse(localStorage.getItem('snowPanels') || '{}'); } catch { return {}; } })();
+// phones: map and highlights start closed (small screen); tap the buttons to open them
+if (IS_TOUCH) { if (panelPref.map === undefined) panelPref.map = false; if (panelPref.hl === undefined) panelPref.hl = false; }
 function applyPanels() {
   liftEl.classList.toggle('hide-map', panelPref.map === false);
   liftEl.classList.toggle('hide-hl', panelPref.hl === false);
@@ -1582,6 +1594,11 @@ function tick(dt, now) {
   ride.send(dt, rider, game.mode, racerName());
   ride.update(dt);
   ride.updateTag(dt, rider, game.mode);
+  if (touch) {
+    const m = game.mode, open = achOpen || replayer.active;
+    touch.setMode(open ? 'off' : m === 'run' ? 'run' : m === 'heli' ? 'heli' : m === 'lift' ? 'lift' : 'off');
+    document.body.classList.toggle('ingame', m === 'run' || m === 'heli' || m === 'lift' || m === 'liftwait');
+  }
   rideEvents(dt);
   const inRide = ride.active && (game.mode === 'run' || game.mode === 'lift' || game.mode === 'liftwait' || game.mode === 'heli');
   rideBadge.classList.toggle('hidden', !inRide);

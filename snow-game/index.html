@@ -2,10 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Snow Game – Prototype</title>
 <meta name="robots" content="noindex">
-<link rel="stylesheet" href="style.css?v=34">
+<link rel="stylesheet" href="style.css?v=35">
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
@@ -65,6 +67,7 @@
     <button id="btn-fullscreen" class="opt small">Full screen</button>
   </div>
   <p class="hint">Keyboard: ↑/↓ snowboarder or skier · ←/→ stance · Enter to start · F ride with friends · L lodge &amp; competitions · T achievements · N music · B sounds<br>Xbox: D-pad up/down rider · left/right stance · A to start · RB ride with friends · X lodge · Y achievements · right stick scrolls this page</p>
+  <p class="hint touch-hint">📱 Turn your phone sideways to ride. Left thumb anywhere on the left: steer (push up to push along, pull down to tuck; in the air it spins and flips). Right thumb: <b>Jump</b> (hold to jump higher), <b>Grab</b> (in the air; on the snow it shoves whoever's beside you), <b>Grind</b> (hold near a rail), <b>Brake</b>. ☰ is the menu.</p>
   <div id="menu-controls"></div>
   <p class="credits">Art: chairlift chair and tower by Poly by Google (CC-BY 3.0, via Poly Pizza) · trees by Quaternius (CC0) · sky and textures from Poly Haven (CC0)</p>
 </div>
@@ -95,8 +98,10 @@
   <div>The helicopter flies across the top of the mountain. Jump whenever you like: <b>Space</b> / <b>A</b></div>
   <div class="muted">Look around: arrow keys, right stick or drag the mouse</div>
   <div class="muted">In the air: ↓ dive · ↑ flare · ← → turn · Space / A opens your parachute</div>
+  <div class="muted touch-hint">📱 Tap JUMP to jump out, then again to open the parachute. Steer with your left thumb.</div>
 </div>
 
+<div id="rotate-hint">📱 Turn your phone sideways to ride</div>
 <div id="ach-toast"></div>
 <div id="cash-toast" class="hidden"></div>
 <div id="online-panel" class="hidden">
@@ -122,6 +127,6 @@
   <div class="muted">Drag or right stick to orbit</div>
 </div>
 
-<script type="module" src="src-v34/main.js"></script>
+<script type="module" src="src-v35/main.js"></script>
 </body>
 </html>

@@ -41,9 +41,13 @@ export class Input {
     // mouse drag to look around (lift ride and replays)
     this.mdx = 0; this.mdy = 0; this.dragging = false;
     this.prevPad = [];
-    window.addEventListener('pointerdown', (e) => { if (e.target.tagName === 'CANVAS') this.dragging = true; });
-    window.addEventListener('pointerup', () => { this.dragging = false; });
-    window.addEventListener('pointermove', (e) => { if (this.dragging) { this.mdx += e.movementX; this.mdy += e.movementY; } });
+    // (one finger / the mouse on the game itself; positions instead of movementX, which phones don't all give)
+    this.dragId = null; this.lastX = 0; this.lastY = 0;
+    this.touchSteer = 0; this.touchY = 0;       // from the on-screen stick (touch.js)
+    window.addEventListener('pointerdown', (e) => { if (e.target.tagName === 'CANVAS' && this.dragId === null) { this.dragging = true; this.dragId = e.pointerId; this.lastX = e.clientX; this.lastY = e.clientY; } });
+    const endDrag = (e) => { if (e.pointerId === this.dragId) { this.dragging = false; this.dragId = null; } };
+    window.addEventListener('pointerup', endDrag); window.addEventListener('pointercancel', endDrag);
+    window.addEventListener('pointermove', (e) => { if (this.dragging && e.pointerId === this.dragId) { this.mdx += e.clientX - this.lastX; this.mdy += e.clientY - this.lastY; this.lastX = e.clientX; this.lastY = e.clientY; } });
   }
 
   _key(name) { return KEYMAP[name].some(k => this.keys.has(k) || this.tapped.has(k)); }
@@ -66,6 +70,10 @@ export class Input {
     let mLeft = k('left'), mRight = k('right'), mUp = k('up'), mDown = k('down');
     let lookX = 0, lookY = 0;
     const padTaps = new Set();
+    // on-screen stick (phones)
+    if (Math.abs(this.touchSteer) > Math.abs(steer)) steer = this.touchSteer;
+    if (this.touchY < -0.5) up = true;
+    if (this.touchY > 0.5) down = true;
 
     const pad = this._pad();
     this.padName = pad ? pad.id : null;
