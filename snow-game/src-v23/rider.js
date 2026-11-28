@@ -538,10 +538,14 @@ export class Rider {
     if (v > TUNE.topSpeed) this.vel.multiplyScalar(TUNE.topSpeed / v);
     const sp = this.speed;
     if (this.state === 'ride') this.topSpeed = Math.max(this.topSpeed, sp);
-    // tree hits
+    this.safeT = Math.max(0, (this.safeT || 0) - dt);
+    // tree hits (a slow bump, or just after getting up, only stops you; it doesn't knock you down)
     if (this.state === 'ride' || this.state === 'air') {
       const t = this.terrain.treeNear(this.pos.x, this.pos.z);
-      if (t && this.pos.y < t.y + t.h) this.doCrash({ tower: 'Hit a lift tower!', lodge: 'Hit the lodge!', yeti: 'Ran into the yeti!' }[t.kind] || 'Hit a tree!');
+      if (t && this.pos.y < t.y + t.h) {
+        if (this.state === 'ride' && (this.safeT > 0 || this.speed < 4)) this._bumpOff(t.x, t.z, t.r + 0.25);
+        else this.doCrash({ tower: 'Hit a lift tower!', lodge: 'Hit the lodge!', yeti: 'Ran into the yeti!' }[t.kind] || 'Hit a tree!');
+      }
     }
   }
 
@@ -851,6 +855,33 @@ export class Rider {
     if ((onGround && this.vel.length() < 1.5 && this.crashT > 0.9) || this.crashT > TUNE.crashTime) this._startGetup();
   }
 
+  // stopped by something solid: step back out of it and lose the speed heading into it
+  _bumpOff(cx, cz, rad) {
+    const dx = this.pos.x - cx, dz = this.pos.z - cz, l = Math.hypot(dx, dz) || 1, nx = dx / l, nz = dz / l;
+    if (l < rad) { this.pos.x = cx + nx * rad; this.pos.z = cz + nz * rad; this.pos.y = this.terrain.heightAt(this.pos.x, this.pos.z); }
+    const vin = this.vel.x * nx + this.vel.z * nz;
+    if (vin < 0) { this.vel.x -= nx * vin * 1.2; this.vel.z -= nz * vin * 1.2; }
+  }
+  _bumpRail(r) {
+    const dx = this.pos.x - r.p0.x, dz = this.pos.z - r.p0.z;
+    const side = Math.sign(-dx * r.dirH.z + dz * r.dirH.x) || 1;
+    const lat = Math.abs(-dx * r.dirH.z + dz * r.dirH.x), want = r.halfW + 0.45;
+    const px = -r.dirH.z * side, pz = r.dirH.x * side;       // out from the rail, on our side
+    if (lat < want) { this.pos.x += px * (want - lat); this.pos.z += pz * (want - lat); this.pos.y = this.terrain.heightAt(this.pos.x, this.pos.z); }
+    const vin = this.vel.x * px + this.vel.z * pz;
+    if (vin < 0) { this.vel.x -= px * vin * 1.2; this.vel.z -= pz * vin * 1.2; }
+  }
+  // clear of every tree and rail?
+  _clearAt(x, z, pad = 0) {
+    if (this.terrain.treeNear(x, z)) return false;
+    for (const r of this.terrain.rails || []) {
+      const dx = x - r.p0.x, dz = z - r.p0.z, u = (dx * r.dirH.x + dz * r.dirH.z) / r.lenH;
+      if (u < -0.05 || u > 1.05) continue;
+      if (Math.abs(-dx * r.dirH.z + dz * r.dirH.x) < r.halfW + 0.4 + pad) return false;
+    }
+    return true;
+  }
+
   _startGetup() {
     this.getupT = 0;
     this.vel.set(0, 0, 0);
@@ -864,6 +895,13 @@ export class Rider {
       const dx = this.pos.x - t.x, dz = this.pos.z - t.z, l = Math.hypot(dx, dz) || 1;
       this.pos.x += dx / l * 1.0; this.pos.z += dz / l * 1.0;
     }
+    // and out from under any rail, box or log (find the nearest clear spot)
+    if (!this._clearAt(this.pos.x, this.pos.z)) {
+      search: for (let rad = 0.6; rad <= 6; rad += 0.6) for (let k = 0; k < 12; k++) {
+        const a = k * Math.PI / 6, x = this.pos.x + Math.cos(a) * rad, z = this.pos.z + Math.sin(a) * rad;
+        if (this._clearAt(x, z, 0.2)) { this.pos.x = x; this.pos.z = z; break search; }
+      }
+    }
     this.pos.y = this.terrain.heightAt(this.pos.x, this.pos.z);
     // face down the run we're on (or straight down the hill)
     const n = this.terrain.normalAt(this.pos.x, this.pos.z, this.normal);
@@ -871,6 +909,9 @@ export class Rider {
     const ra = this.terrain.runAt ? this.terrain.runAt(this.pos.x, this.pos.z) : null;
     if (ra && ra.d < ra.run.hw + 30) { const a = ra.run.at(ra.s + 8); dx = a.tx; dz = a.tz; }
     this.yaw = Math.atan2(dx, -dz);
+    // ... unless a tree or rail is right in front: turn to the nearest open line
+    const openAhead = (yaw) => { for (let d = 1; d <= 5; d += 1) if (!this._clearAt(this.pos.x + Math.sin(yaw) * d, this.pos.z - Math.cos(yaw) * d)) return false; return true; };
+    if (!openAhead(this.yaw)) for (const off of [0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6]) if (openAhead(this.yaw + off)) { this.yaw += off; break; }
     this.switch = false;
     this.alignQ.setFromUnitVectors(UP, n);
     this.getupToQ = this.alignQ.clone().multiply(new THREE.Quaternion().setFromAxisAngle(UP, -this.yaw));
@@ -882,6 +923,7 @@ export class Rider {
       this.getupT = -1;
       this.state = 'ride';
       this.crouch = 0.5;
+      this.safeT = 1.2;      // a moment to get going before trees and rails can knock you down again
       this.vel.set(Math.sin(this.yaw), 0, -Math.cos(this.yaw)).multiplyScalar(1.5);
       this.events.push({ type: 'recovered' });
     }
@@ -1153,6 +1195,7 @@ export class Rider {
       if (lat > r.halfW + 0.22) continue;
       const ry = r.p0.y + (r.p1.y - r.p0.y) * Math.max(0, Math.min(1, u)) + r.top;
       if (p.y > ry - 0.1 || p.y < ry - 1.4) continue;
+      if (this.safeT > 0 || Math.hypot(this.vel.x, this.vel.z) < 3) { this._bumpRail(r); return; }
       this.doCrash(r.kind === 'log' ? 'Hit the log! Hold grind to ride it' : r.kind === 'box' ? 'Hit the box! Hold grind to slide it' : 'Hit the rail! Hold grind to ride it');
       return;
     }
