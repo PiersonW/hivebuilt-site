@@ -1319,8 +1319,13 @@ export class Rider {
 
   // ---------------- visuals ----------------
   // another player's rider: its root position and rotation come over the network; just pose the body
-  renderRemote(dt) {
+  renderRemote(dt, o = {}) {
     this.grab = null; this.phantomT = -1; this.flipVel = 0; this.spinVel = 0; this.pushAmt = 0; this.climbing = false;
+    // wingsuit: wings on, board / skis off, flat flying pose
+    const flying = this.state === 'fly' && !o.chute;
+    if (flying !== !!this._rFly) { this._rFly = flying; this.gear.visible = !flying; this._wings(flying); if (!flying) this._orientBody(); }
+    if (flying) { this._flyPose(); return; }
+    if (this.state === 'fly' || this.state === 'heli') { const st = this.state; this.state = 'air'; this._updatePose(dt, {}); this.state = st; return; }
     this._updatePose(dt, {});
   }
 

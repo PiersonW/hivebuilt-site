@@ -23,6 +23,7 @@ import { SKI_GRABS } from './rider.js';
 import { TreeLOD } from './trees.js';
 import { SbxRace } from './sbx.js';
 import { Net, newCode, LETTERS, MAX_PLAYERS } from './net.js';
+import { RideTogether } from './ride.js';
 import { Sfx } from './sfx.js';
 import { Comps, COMPS, COMP_BY_ID, PRIZES, FINISH_PRIZE, ACH_PRIZE, fmtValue, ordinal, money } from './comps.js';
 
@@ -85,6 +86,8 @@ const heli = new Helicopter(scene);
 const race = new Race(scene, terrain);
 const sbx = new SbxRace(scene, terrain);    // snowboard cross: you and 5 bots out of the start gate
 const net = new Net();                      // online snowboard cross with friends (room codes)
+const rideNet = new Net();                  // riding the mountain together (its own room)
+const ride = new RideTogether(scene, terrain, rideNet);
 const longJump = new LongJump(terrain);
 // background music (original pop-punk): starts on the first click / key / controller press (browser rule)
 const music = new Music();
@@ -213,7 +216,7 @@ const game = {
   regular: true,
   score: 0, time: 0, crashes: 0, bestTrick: null, tricksLanded: 0, started: false,
 };
-window.__game = { net, sbx, sfx, treeLod, comps, enterComp: (id) => enterComp(id), openLodge: () => openLodge(), getComp: () => comp, music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
+window.__game = { ride, rideNet, net, sbx, sfx, treeLod, comps, enterComp: (id) => enterComp(id), openLodge: () => openLodge(), getComp: () => comp, music, longJump, race, ach, npcs, scene, renderer, IS_XBOX, LOW_GFX, game, rider, terrain, tricks, input, chase, camera, lifts, laneEntrance, recorder, replayer, startLift: (i) => startLift(lifts[i]), endRun: (i) => endRun(lifts[i]) }; // handy for debugging in the console
 
 function setStance(regular) {
   game.regular = regular;
@@ -635,7 +638,12 @@ document.getElementById('lodge-close').onclick = () => closeLodge();
 
 // ---------- online snowboard cross (room codes) ----------
 const onlineEl = document.getElementById('online-panel'), onlineBody = document.getElementById('online-body');
-const online = { view: 'off', code: ['A', 'A', 'A', 'A'], cur: 0, msg: '' };
+const online = { view: 'off', code: ['A', 'A', 'A', 'A'], cur: 0, msg: '', kind: 'sbx' };
+const rideBadge = document.getElementById('ride-badge');
+const curNet = () => online.kind === 'ride' ? rideNet : net;
+ride.onChange = () => { if (game.mode === 'online' && online.kind === 'ride') renderOnline(); updateFriendsBtn(); };
+function updateFriendsBtn() { document.getElementById('btn-friends').textContent = ride.active ? `👥 Friends · room ${rideNet.code} · ${ride.count} rider${ride.count === 1 ? '' : 's'}` : '👥 Ride with friends'; }
+function openFriends() { online.kind = 'ride'; openOnline(ride.active ? 'lobby' : 'choose'); }
 net.on = (event, payload) => {
   if (event === 'start') { if (game.mode === 'online') startOnlineRace(payload); }
   else sbx.receive(event, payload);
@@ -644,7 +652,7 @@ net.onPlayers = (list) => { sbx.playersChanged(list); if (game.mode === 'online'
 
 function openOnline(view) {
   game.mode = 'online'; online.view = view; online.msg = '';
-  lodgeEl.classList.add('hidden'); raceResultEl.classList.add('hidden'); compHudEl.classList.add('hidden'); hud.show(false);
+  menuEl.classList.add('hidden'); lodgeEl.classList.add('hidden'); raceResultEl.classList.add('hidden'); compHudEl.classList.add('hidden'); hud.show(false);
   if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
   onlineEl.classList.remove('hidden');
   renderOnline();
@@ -652,21 +660,32 @@ function openOnline(view) {
 async function connectTo(code) {
   online.view = 'connecting'; online.code = code.split(''); renderOnline();
   try {
-    await net.join(code, { name: racerName() });
+    const N = curNet();
+    await N.join(code, { name: racerName() }, online.kind);
     // wait a moment for the room list, then make sure there's space
     await new Promise(r => setTimeout(r, 700));
-    if (net.players.length > MAX_PLAYERS && !net.players.slice(0, MAX_PLAYERS).some(p => p.id === net.id)) { await net.leave(); online.view = 'code'; online.msg = `Room ${code} is full (6 riders).`; }
+    if (N.players.length > MAX_PLAYERS && !N.players.slice(0, MAX_PLAYERS).some(p => p.id === N.id)) { await N.leave(); online.view = 'code'; online.msg = `Room ${code} is full (6 riders).`; }
     else online.view = 'lobby';
+    updateFriendsBtn();
   } catch (e) { online.view = 'code'; online.msg = `Couldn't connect: ${e.message}. Check the code and your internet, then try again.`; }
   if (game.mode === 'online') renderOnline();
 }
-function hostOnline() { openOnline('connecting'); connectTo(newCode()); }
-function joinOnline() { online.code = ['A', 'A', 'A', 'A']; online.cur = 0; openOnline('code'); }
+function hostOnline(kind = 'sbx') { online.kind = kind; openOnline('connecting'); connectTo(newCode()); }
+function joinOnline(kind = 'sbx') { online.kind = kind; online.code = ['A', 'A', 'A', 'A']; online.cur = 0; openOnline('code'); }
 async function leaveOnline(toLodge = true) {
+  if (online.kind === 'ride' && game.mode === 'online') {
+    // leaving a ride-together room
+    if (rideNet.code) rideNet.send('bye', { id: rideNet.id });
+    await rideNet.leave(); ride.clear(); updateFriendsBtn(); onlineEl.classList.add('hidden'); online.view = 'off'; online.kind = 'sbx';
+    showMenu(); return;
+  }
   if (net.code) net.send('left', { id: net.id });
   await net.leave(); online.view = 'off'; onlineEl.classList.add('hidden');
   if (toLodge && game.mode === 'online') openLodge();
 }
+// leave the friends panel but stay in the room
+function closeFriends(go = false) { onlineEl.classList.add('hidden'); online.view = 'off'; online.kind = 'sbx'; if (go) startHeliOrRun(); else showMenu(); }
+function startHeliOrRun() { startRun(); }
 // after an online race: back to the room for another
 function backToRoom() {
   if (!net.code) { openLodge(); return; }
@@ -677,6 +696,28 @@ function backToRoom() {
 
 function renderOnline() {
   const usePad = !!input.padName || IS_XBOX, go = document.getElementById('online-go'), help = document.getElementById('online-help');
+  const N = curNet(), rideKind = online.kind === 'ride';
+  onlineEl.querySelector('.panel-title').textContent = rideKind ? '👥 Ride with friends' : '🌐 Snowboard Cross · Online';
+  onlineEl.querySelector('.lodge-head .muted').textContent = rideKind ? 'Up to 6 riders · see each other anywhere on the mountain' : 'Up to 6 riders · bots fill the empty gates';
+  document.getElementById('online-leave').textContent = rideKind && online.view === 'lobby' ? 'Leave room' : 'Leave';
+  if (online.view === 'choose') {
+    onlineBody.innerHTML = `<div class="comp-desc">Start a room and tell your friends the code, or join theirs. Everyone in the room sees each other riding, on the lifts and flying.</div>` +
+      `<div class="choose-btns"><button id="btn-ride-host" class="big">👥 Host a room ${usePad ? '(X)' : '(O)'}</button><button id="btn-ride-join" class="opt">🔑 Join with a code ${usePad ? '(Y)' : '(J)'}</button></div>`;
+    document.getElementById('btn-ride-host').onclick = () => hostOnline('ride');
+    document.getElementById('btn-ride-join').onclick = () => joinOnline('ride');
+    go.classList.add('hidden'); help.innerHTML = usePad ? '🎮 <b>X</b> host · <b>Y</b> join · <b>B</b> back' : '<b>O</b> host · <b>J</b> join · <b>Esc</b> back';
+    return;
+  }
+  if (online.view === 'lobby' && rideKind) {
+    const list = N.players.slice(0, MAX_PLAYERS);
+    onlineBody.innerHTML = `<div class="comp-desc">Room code (tell your friends):</div><div class="room-code">${N.code.split('').map(ch => `<span>${ch}</span>`).join('')}</div>` +
+      `<div class="panel-title">Riders in the room (${list.length} / ${MAX_PLAYERS})</div><div class="online-players">` +
+      list.map(p => `<div class="${p.id === N.id ? 'me' : ''}">${escapeHtml(p.name)}${p.id === N.id ? ' (you)' : ''}</div>`).join('') + '</div>' +
+      `<div class="muted">Go ride: helicopter, summit, lifts or competitions. You'll see each other with name tags (and on the lift's trail map). You stay in the room until you leave it.</div>`;
+    go.textContent = 'Go ride!'; go.classList.remove('hidden');
+    help.innerHTML = usePad ? '🎮 <b>A</b> go ride · <b>B</b> back to the menu · <b>X</b> leave the room' : '<b>Enter</b> go ride · <b>Esc</b> back to the menu · <b>X</b> leave the room';
+    return;
+  }
   if (online.view === 'code') {
     onlineBody.innerHTML = `<div class="comp-desc">Type the 4-letter code from whoever is hosting the race.</div>` +
       `<div class="room-code">${online.code.map((ch, i) => `<span class="${i === online.cur ? 'cur' : ''}">${ch}</span>`).join('')}</div>` +
@@ -707,12 +748,18 @@ function hostStart() {
   net.send('start', plan);
   startOnlineRace(plan);
 }
-document.getElementById('online-go').onclick = () => { if (online.view === 'code') connectTo(online.code.join('')); else if (online.view === 'lobby') hostStart(); };
+document.getElementById('online-go').onclick = () => { if (online.view === 'code') connectTo(online.code.join('')); else if (online.view === 'lobby') { if (online.kind === 'ride') closeFriends(true); else hostStart(); } };
 document.getElementById('online-leave').onclick = () => leaveOnline(true);
 
 function updateOnline(dt, inp) {
   const pad = (...b) => b.some(i => inp.padTaps.has(i));
-  if (inp.menuPressed || pad(BTN.B)) { if (online.view === 'code') { onlineEl.classList.add('hidden'); online.view = 'off'; openLodge(); } else leaveOnline(true); return; }
+  const rideKind = online.kind === 'ride';
+  if (inp.menuPressed || pad(BTN.B)) {
+    if (rideKind) { if (online.view === 'lobby') closeFriends(false); else if (online.view === 'code' || online.view === 'choose') { if (online.view === 'code') { online.view = 'choose'; renderOnline(); } else closeFriends(false); } return; }
+    if (online.view === 'code') { onlineEl.classList.add('hidden'); online.view = 'off'; openLodge(); } else leaveOnline(true); return;
+  }
+  if (rideKind && online.view === 'choose') { if (pad(BTN.X) || inp.taps.has('KeyO')) hostOnline('ride'); else if (pad(BTN.Y) || inp.taps.has('KeyJ')) joinOnline('ride'); }
+  if (rideKind && online.view === 'lobby') { if (inp.confirmPressed) { closeFriends(true); return; } if (pad(BTN.X) || inp.taps.has('KeyX')) { leaveOnline(); return; } }
   if (online.view === 'code') {
     let changed = false;
     for (const t of inp.taps) {
@@ -727,7 +774,7 @@ function updateOnline(dt, inp) {
     if (pad(BTN.LEFT) || inp.taps.has('ArrowLeft')) { online.cur = Math.max(0, online.cur - 1); changed = true; }
     if (inp.confirmPressed) { connectTo(online.code.join('')); return; }
     if (changed) renderOnline();
-  } else if (online.view === 'lobby' && inp.confirmPressed && net.isHost) hostStart();
+  } else if (!rideKind && online.view === 'lobby' && inp.confirmPressed && net.isHost) hostStart();
   // camera: same lodge view behind the panel
   const t = performance.now() / 9000;
   camera.position.set(LODGE.x + 14 + Math.sin(t) * 3, terrain.heightAt(LODGE.x, LODGE.z + 30) + 6, LODGE.z + 32);
@@ -1148,6 +1195,7 @@ document.getElementById('btn-goofy').onclick = () => setStance(false);
 document.getElementById('btn-start').onclick = () => startHeli();
 document.getElementById('btn-summit').onclick = () => startRun();
 document.getElementById('btn-lodge').onclick = () => openLodge();
+document.getElementById('btn-friends').onclick = () => openFriends();
 document.getElementById('btn-ach').onclick = () => toggleAch(true);
 document.getElementById('btn-ach-lift').onclick = () => toggleAch(true);
 document.getElementById('ach-close').onclick = () => toggleAch(false);
@@ -1271,6 +1319,7 @@ function tick(dt, now) {
     if (inp.downPressed) setSport('ski');
     if (inp.confirmPressed) startHeli();
     else if (inp.taps.has('KeyL') || inp.padTaps.has(BTN.X)) openLodge();
+    else if (inp.taps.has('KeyF') || inp.padTaps.has(BTN.RB)) openFriends();
     // slow orbit preview of the rider at the top
     const t = now / 4000;
     camera.position.set(rider.pos.x + Math.sin(t) * 7, rider.pos.y + 2.5, rider.pos.z + Math.cos(t) * 7);
@@ -1411,7 +1460,7 @@ function tick(dt, now) {
       else updateLiftCamera();
       if (st.u >= curLift.unloadU && st.u < curLift.unloadU + 15) { if (replayer.active) stopReplay(); unload(); }
     }
-    trailMap.draw(rider.pos);
+    trailMap.draw(rider.pos, ride.mapDots());
   }
 
   if (!(game.mode === 'run' && game.paused)) npcs.update(dt, camera.position, rider.pos);
@@ -1434,6 +1483,12 @@ function tick(dt, now) {
   sun.target.position.copy(focus);
 
   treeLod.update(camera.position);
+  // riding together: send yourself, draw your friends
+  ride.send(dt, rider, game.mode, racerName());
+  ride.update(dt);
+  const inRide = ride.active && (game.mode === 'run' || game.mode === 'lift' || game.mode === 'liftwait' || game.mode === 'heli');
+  rideBadge.classList.toggle('hidden', !inRide);
+  if (inRide) { const t = `👥 Room ${rideNet.code} · ${ride.count} rider${ride.count === 1 ? '' : 's'}`; if (rideBadge.textContent !== t) rideBadge.textContent = t; }
   // sound effects follow what you're doing
   const st = rider.state, onLiftNow = game.mode === 'lift' || game.mode === 'liftwait';
   sfx.update(dt, {

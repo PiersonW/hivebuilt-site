@@ -147,9 +147,15 @@ export class TrailMap {
   }
 
   // Redraw with a "you are here" dot.
-  draw(you) {
+  draw(you, friends = []) {
     const g = this.canvas.getContext('2d');
     g.drawImage(this.base, 0, 0);
+    for (const f of friends) {
+      const [x, y] = this.toMap(f.x, f.z);
+      g.fillStyle = f.color; g.strokeStyle = '#1d2a44'; g.lineWidth = 2;
+      g.beginPath(); g.arc(x, y, 5, 0, Math.PI * 2); g.fill(); g.stroke();
+      this._label(g, f.name, x + 8, y, '#1d2a44', 'left', 11);
+    }
     if (you) {
       const [x, y] = this.toMap(you.x, you.z);
       g.fillStyle = '#ff3d3d'; g.strokeStyle = '#fff'; g.lineWidth = 2;

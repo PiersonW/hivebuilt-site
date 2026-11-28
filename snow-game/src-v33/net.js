@@ -1,5 +1,6 @@
-// Online play: friends race each other using a 4-letter room code. Uses Supabase Realtime "broadcast" and
-// "presence" only (no database tables), on the Road Rivals project, in channels named snowgame:sbx:<CODE>.
+// Online play: friends race (snowgame:sbx:<CODE>) or ride the mountain together (snowgame:ride:<CODE>)
+// using a 4-letter room code. Uses Supabase Realtime "broadcast" and "presence" only (no database tables),
+// on the Road Rivals project.
 // Each player sends their own rider ~15 times a second; the host also runs any bots and sends theirs.
 //
 //   const net = new Net();
@@ -15,6 +16,7 @@ const KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZi
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';      // no I or O (they look like 1 and 0)
 export const MAX_PLAYERS = 6;
 
+let sharedClient = null;
 export function newCode() { let c = ''; for (let i = 0; i < 4; i++) c += LETTERS[Math.floor(Math.random() * LETTERS.length)]; return c; }
 export { LETTERS };
 
@@ -30,11 +32,12 @@ export class Net {
   get connected() { return this.status === 'connected'; }
   get isHost() { return this.players.length > 0 && this.players[0].id === this.id; }
 
-  async join(code, me) {
+  async join(code, me, kind = 'sbx') {
     await this.leave();
-    if (!this.client) this.client = createClient(URL, KEY, { realtime: { params: { eventsPerSecond: 40 } } });
+    if (!sharedClient) sharedClient = createClient(URL, KEY, { realtime: { params: { eventsPerSecond: 40 } } });
+    this.client = sharedClient;
     this.code = code; this.status = 'connecting'; this.me = { id: this.id, name: me.name, joinedAt: Date.now() };
-    const ch = this.client.channel(`snowgame:sbx:${code}`, { config: { broadcast: { self: false }, presence: { key: this.id } } });
+    const ch = this.client.channel(`snowgame:${kind}:${code}`, { config: { broadcast: { self: false }, presence: { key: this.id } } });
     this.channel = ch;
     ch.on('presence', { event: 'sync' }, () => {
       const st = ch.presenceState(), list = [];

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Snow Game – Prototype</title>
 <meta name="robots" content="noindex">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=33">
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
@@ -29,6 +29,7 @@
   <div id="race-hud" class="hidden"></div>
   <div id="balance" class="hidden"><span class="bal-label">BALANCE · steer ← → to stay on</span><div class="bal-bar"><div class="bal-mid"></div><div id="bal-dot"></div></div></div>
   <div id="comp-hud" class="hidden"></div>
+  <div id="ride-badge" class="hidden"></div>
   <div id="lodge-hint" class="hidden"></div>
   <div id="race-result" class="hidden"></div>
   <div id="popups"></div>
@@ -54,6 +55,7 @@
   </div>
   <p id="pad-help" class="warn hidden">Controller not reaching the game? Hold the Menu button (three lines) until a menu appears, then choose “Use game controls”. Then press A.</p>
   <button id="btn-start" class="big">🚁 Helicopter drop</button>
+  <button id="btn-friends" class="opt lodge-btn">👥 Ride with friends</button>
   <button id="btn-lodge" class="opt lodge-btn">🏠 Lodge · competitions <span class="wallet">💰 <span class="cash-amt">$0</span></span></button>
   <div class="menu-row">
     <button id="btn-summit" class="opt small">Start at the summit</button>
@@ -62,7 +64,7 @@
     <button id="btn-sfx" class="opt small toggle on">🔊 Sounds</button>
     <button id="btn-fullscreen" class="opt small">Full screen</button>
   </div>
-  <p class="hint">Keyboard: ↑/↓ snowboarder or skier · ←/→ stance · Enter to start · L lodge &amp; competitions · T achievements · N music · B sounds<br>Xbox: D-pad up/down rider · left/right stance · A to start · X lodge · Y achievements · right stick scrolls this page</p>
+  <p class="hint">Keyboard: ↑/↓ snowboarder or skier · ←/→ stance · Enter to start · F ride with friends · L lodge &amp; competitions · T achievements · N music · B sounds<br>Xbox: D-pad up/down rider · left/right stance · A to start · RB ride with friends · X lodge · Y achievements · right stick scrolls this page</p>
   <div id="menu-controls"></div>
   <p class="credits">Art: chairlift chair and tower by Poly by Google (CC-BY 3.0, via Poly Pizza) · trees by Quaternius (CC0) · sky and textures from Poly Haven (CC0)</p>
 </div>
@@ -120,6 +122,6 @@
   <div class="muted">Drag or right stick to orbit</div>
 </div>
 
-<script type="module" src="src-v32/main.js"></script>
+<script type="module" src="src-v33/main.js"></script>
 </body>
 </html>
