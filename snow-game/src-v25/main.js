@@ -257,12 +257,16 @@ function startRun(at = null, yaw = 0) {
 
 // ---------- helicopter drop ----------
 const heliUi = document.getElementById('heli-ui');
+// the how-to for the drop shows only until you've jumped once (remembered in this browser)
+let heliSeen = false;
+try { heliSeen = localStorage.getItem('snowHeliSeen') === '1'; } catch {}
+if (ach.has('heli')) heliSeen = true;      // you've done it before
 let heliCam = 0;
 function startHeli() {
   startRun();
   game.mode = 'heli';
   hud.show(false);
-  heliUi.classList.remove('hidden');
+  heliUi.classList.toggle('hidden', heliSeen);
   // the helicopter flies itself back and forth along the top ridge, from the right side to the left
   const z = -25, a = new THREE.Vector3(330, 0, z), b = new THREE.Vector3(-330, 0, z);
   const start = new THREE.Vector3(300, terrain.heightAt(300, z) + 140, z);
@@ -292,6 +296,7 @@ function updateHeliMode(dt, inp) {
   if (Math.abs(camera.fov - 62) > 0.1) { camera.fov = 62; camera.updateProjectionMatrix(); }
   if (inp.confirmPressed || inp.taps.has('Space') || inp.padTaps.has(BTN.A)) {
     heliUi.classList.add('hidden');
+    if (!heliSeen) { heliSeen = true; try { localStorage.setItem('snowHeliSeen', '1'); } catch {} }
     // dive out the downhill door, carrying the helicopter's speed
     const f = new THREE.Vector3(Math.sin(heli.yaw), 0, -Math.cos(heli.yaw));
     const dir = d.out.clone().multiplyScalar(14).addScaledVector(f, heli.speed);
@@ -783,6 +788,10 @@ const pushHint = { t: 0 };
 let inLane = null;
 // where the lift line starts (between the ropes, at the back of the line)
 function laneEntrance(l) { return l.bottom.clone().addScaledVector(l.f, l.lane.d0 - 3).addScaledVector(l.p, (l.lane.l0 + l.lane.l1) / 2); }
+// flying tips only on your first couple of flights; after that just the height
+let flightCount = 0;
+try { flightCount = +(localStorage.getItem('snowFlights') || 0); } catch {}
+let flightTips = flightCount < 2 && !ach.has('heli');
 function updateLiftGuide() {
   if (rider.state !== 'fly') {
     let near = Infinity;
@@ -793,8 +802,8 @@ function updateLiftGuide() {
     const above = Math.max(0, rider.pos.y - terrain.heightAt(rider.pos.x, rider.pos.z));
     const ft = Math.round(above * 3.281);
     liftGuideEl.innerHTML = rider.chute
-      ? `🪂 Parachute open · ${ft} ft<br><small>← → steer · hold Shift + arrows to look around · you'll touch down and ride away</small>`
-      : `🦅 Wingsuit · ${ft} ft above the snow<br><small>↓ dive · ↑ flare · ← → turn · Space / A opens the parachute (it opens by itself at 50 ft)</small>`;
+      ? `🪂 ${ft} ft` + (flightTips ? `<br><small>← → steer · hold Shift + arrows to look around · you'll touch down and ride away</small>` : '')
+      : `🦅 ${ft} ft` + (flightTips ? `<br><small>↓ dive · ↑ flare · ← → turn · Space / A opens the parachute (it opens by itself at 50 ft)</small>` : '');
     liftGuideEl.classList.remove('hidden');
     return;
   }
@@ -1009,7 +1018,10 @@ function handleEvents() {
       if (ev.dist >= 800) ach.unlock('flight');
       emitPowder(30, rider.pos, rider.vel, 2.5);
     }
-    else if (ev.type === 'fly-end') { /* flight over (landed or crashed) */ }
+    else if (ev.type === 'fly-end') {   // flight over (landed or crashed): count it for the flying tips
+      flightCount = (flightCount || 0) + 1; flightTips = flightCount < 2;
+      try { localStorage.setItem('snowFlights', String(flightCount)); } catch {}
+    }
     else if (ev.type === 'chute') { hud.popup('🪂 Parachute!', 0); sfx.chute(); }
     else if (ev.type === 'grind-start') { if (!tricks.active) { tricks.begin(); recorder.onTakeoff(); } sfx.click(); }
     else if (ev.type === 'land') {
