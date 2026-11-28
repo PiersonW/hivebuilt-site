@@ -43,8 +43,9 @@ export class Chairlift {
     this._buildPath();
     this._buildMeshes();
     // both cables, tower to tower, can be ground from the air (hold RB as you fly past one)
-    for (const side of [1, -1]) {
-      const pts = this.towers.slice(1, -1).map(t => t.clone().addScaledVector(this.p, side * WHEEL_R));
+    const dA = this._along(this.towers[1] || this.towers[0]), dB = this._along(this.towers[this.towers.length - 2] || this.towers[0]);
+    for (const line of [this.upLine, this.downLine]) {
+      const pts = line.filter((q, k) => k % 6 === 0 && this._along(q) >= dA && this._along(q) <= dB);
       if (pts.length > 1) terrain.addRailChain(pts, 'liftcable', 0.05, 0.06, { lift: this });
     }
     terrain.clearTreesAlong(this.bottom, this.top, 7);
@@ -130,8 +131,39 @@ export class Chairlift {
       tail.push(flat(this.length - 7, side, true), pts[last]);
       return [...head, ...pts.slice(1, last), ...tail];
     };
-    const up = line(1);
-    const down = line(-1).reverse();
+    // A real cable curves smoothly over each tower's wheels instead of bending sharply at a point. Sample the
+    // line every half metre and round off every corner (box-smooth the height over ±8 m), keeping the load and unload
+    // spots exactly where they are. Without this the chair (and your view from it) jolted at every tower.
+    const smoothCable = (pts) => {
+      // the original line as height vs distance along the lift (piecewise straight)
+      const D = pts.map(q => (q.x - this.bottom.x) * f.x + (q.z - this.bottom.z) * f.z), Y = pts.map(q => q.y);
+      // integral of the height from the start, so a box average over [d-W, d+W] is exact and perfectly smooth
+      const F = [0];
+      for (let i = 1; i < pts.length; i++) F.push(F[i - 1] + (Y[i] + Y[i - 1]) / 2 * (D[i] - D[i - 1]));
+      const yAt = (d) => { let i = 1; while (i < D.length - 1 && D[i] < d) i++; const t = (d - D[i - 1]) / Math.max(1e-6, D[i] - D[i - 1]); return Y[i - 1] + (Y[i] - Y[i - 1]) * t; };
+      const FAt = (d) => {
+        d = Math.max(D[0], Math.min(D[D.length - 1], d));
+        let i = 1; while (i < D.length - 1 && D[i] < d) i++;
+        const y = yAt(d);
+        return F[i - 1] + (Y[i - 1] + y) / 2 * (d - D[i - 1]);
+      };
+      const d0 = D[0], d1 = D[D.length - 1], keep = [this.loadU, this.length - 7];
+      const dense = [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1], n = Math.max(1, Math.ceil(a.distanceTo(b) / 0.5));
+        for (let k = 0; k < n; k++) dense.push(a.clone().lerp(b, k / n));
+      }
+      dense.push(pts[pts.length - 1].clone());
+      for (const q of dense) {
+        const d = (q.x - this.bottom.x) * f.x + (q.z - this.bottom.z) * f.z;
+        const W = Math.max(0, Math.min(8, ...keep.map(c => 0.6 * Math.abs(d - c)), d - d0, d1 - d));
+        if (W > 0.05) q.y = (FAt(d + W) - FAt(d - W)) / (2 * W);
+      }
+      return dense;
+    };
+    const up = smoothCable(line(1));
+    const down = smoothCable(line(-1)).reverse();
+    this.upLine = up; this.downLine = down;
     const arc = (c, startDir, midDir) => {
       const out = [];
       for (let i = 0; i <= 12; i++) {
@@ -152,6 +184,14 @@ export class Chairlift {
     this.topArcLen = Math.PI * r;
     this.botArcStart = this.total - Math.PI * r;
     this.nChairs = Math.floor(this.total / this.spacing);
+  }
+
+  _along(q) { return (q.x - this.bottom.x) * this.f.x + (q.z - this.bottom.z) * this.f.z; }
+  // height of the (smoothed) up cable at a tower, so the tower's wheels sit right under it
+  cableYAt(t) {
+    const d = this._along(t); let best = null;
+    for (const q of this.upLine) { const e = Math.abs(this._along(q) - d); if (!best || e < best.e) best = { e, y: q.y }; }
+    return best ? best.y : t.y;
   }
 
   // Cable speed at distance u along the loop: slow through the stations, fast in between.
@@ -293,7 +333,7 @@ export class Chairlift {
     for (const o of this._towerObjs) g.remove(o);
     this._towerObjs = [];
     for (const t of this.towers.slice(1, -1)) {
-      const m = towerMesh(art, this.terrain.terrainHeight(t.x, t.z), t.y, yaw);
+      const m = towerMesh(art, this.terrain.terrainHeight(t.x, t.z), this.cableYAt(t), yaw);
       m.position.x = t.x; m.position.z = t.z;
       g.add(m); this._towerObjs.push(m);
     }
