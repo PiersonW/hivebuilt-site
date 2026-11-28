@@ -87,8 +87,8 @@ export class Input {
       grabsHeld[1] = grabsHeld[1] || b(BTN.B);
       grabsHeld[2] = grabsHeld[2] || b(BTN.LB);
       grabsHeld[3] = grabsHeld[3] || b(BTN.Y);
-      phantom = phantom || b(BTN.RB);
-      grind = grind || b(BTN.RS) || b(BTN.LS);
+      phantom = phantom || b(BTN.LS);           // left stick click
+      grind = grind || b(BTN.RB);               // hold RB to grind rails, boxes and logs
       restart = restart || b(BTN.MENU);
       menu = menu || b(BTN.VIEW);
       confirm = confirm || b(BTN.A);
@@ -135,8 +135,9 @@ export const CONTROLS = [
   ['Grab 2 (Melon / Mute)', 'S', 'B'],
   ['Grab 3 (Method / Japan)', 'D', 'LB'],
   ['Grab 4 (Nose / Tail)', 'F', 'Y'],
-  ['Phantom Flip (gear off feet)', 'W', 'RB'],
-  ['Grind: hold it to get on a rail, box or log (+ ← → = boardslide)', 'E', 'Stick click'],
+  ['Phantom Flip (gear off feet)', 'W', 'Left stick click'],
+  ['Grind: hold it to get on a rail, box or log (+ ← → = boardslide)', 'E', 'RB (hold)'],
+  ['Look around (lets go = back behind you)', 'Shift + arrows when stopped', 'Right stick'],
   ['Restart (retries a competition) / menu', 'R / Esc', 'Menu / View'],
   ['Lodge competitions (stopped at the lodge door)', 'Enter', 'A'],
   ['Pause', 'P', '—'],

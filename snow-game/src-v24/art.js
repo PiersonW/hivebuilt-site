@@ -19,3 +19,4 @@ export function tex(file, { srgb = false, repeat = [1, 1] } = {}) {
 }
 
 export const SKY_PHOTO = 'assets/sky/kloofendal_48d_partly_cloudy_puresky_2k.hdr';
+export const SKY_PHOTO_SMALL = 'assets/sky/kloofendal_48d_partly_cloudy_puresky_1k.hdr';   // Xbox / low graphics

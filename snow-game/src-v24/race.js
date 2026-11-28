@@ -165,16 +165,24 @@ export class Race {
   reset() { this.abort(); this.prevStart = null; }
 
   // ---- ghost of your best run ----
+  // build the see-through ghost rider (done at load time so starting a race doesn't stall)
+  prepareGhost() {
+    if (!this.ghostRider) {
+      this.ghostRider = new Rider(this.scene, this.terrain);
+      // see-through copy (some parts, like the board, have more than one material)
+      const ghostly = (m) => { const c = m.clone(); c.transparent = true; c.opacity = 0.38; c.depthWrite = false; return c; };
+      this.ghostRider.root.traverse(o => { if (o.isMesh) { o.material = Array.isArray(o.material) ? o.material.map(ghostly) : ghostly(o.material); o.castShadow = false; } });
+      this.ghostRider.root.visible = false;
+    }
+    return this.ghostRider;
+  }
+
   _startGhost() {
     const b = this.data.best;
     if (!b || !b.ghost || b.ghost.length < 16) return;
-    if (!this.ghostRider) {
-      this.ghostRider = new Rider(this.scene, this.terrain);
-      this.ghostRider.root.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0.38; o.material.depthWrite = false; o.castShadow = false; } });
-    }
+    this.prepareGhost();
     const gr = this.ghostRider;
     gr.setSport(b.ghostSport || 'board');
-    gr.root.traverse(o => { if (o.isMesh) { o.material.transparent = true; o.material.opacity = 0.38; } });
     gr.root.visible = true;
     this.ghost = b.ghost; this.ghostT = 0;
   }

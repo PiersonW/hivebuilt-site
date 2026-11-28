@@ -28,10 +28,11 @@ export class Hud {
     this.padName = padName;
     const pad = !!padName;
     const rows = CONTROLS.map(([a, k, p]) => `<b>${pad ? p : k}</b> ${a}`).join('<br>');
-    this.el.help.innerHTML = `${pad ? '🎮 Controller' : '⌨️ Keyboard'}<br>${rows}<br><span class="tog">H hides this</span>`;
+    this.el.help.innerHTML = `${pad ? '🎮 Controller' : '⌨️ Keyboard'}<br>${rows}<br><span class="tog">${pad ? 'Hides by itself after a few seconds of riding · all controls are on the home screen' : 'H hides this'}</span>`;
   }
 
-  toggleHelp() { this.showHelp = !this.showHelp; this.el.help.classList.toggle('hidden', !this.showHelp); }
+  toggleHelp() { this.helpTouched = true; this.setHelp(!this.showHelp); }
+  setHelp(on) { this.showHelp = on; this.el.help.classList.toggle('hidden', !on); }
 
   show(on) { this.el.hud.classList.toggle('hidden', !on); }
 

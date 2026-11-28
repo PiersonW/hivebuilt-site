@@ -38,11 +38,18 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.5;
 
+// if the graphics chip resets (Xbox when it runs short of memory), reload cleanly instead of coming back
+// half-drawn (all-white materials); your records, money and settings are saved in the browser
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  const n = document.createElement('div'); n.className = 'gfx-reset'; n.textContent = 'Graphics reset, reloading…'; document.body.appendChild(n);
+  setTimeout(() => location.reload(), 1500);
+});
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 15000);
 
 // sky, sunlight and haze
-const { sun: SUN_DIR } = setupSky(scene, renderer, { elevation: 30, azimuth: 205 });
+const { sun: SUN_DIR } = setupSky(scene, renderer, { elevation: 30, azimuth: 205, low: LOW_GFX });
 scene.fog = new THREE.FogExp2(0xa9c3e0, 0.00038);
 const hemi = new THREE.HemisphereLight(0xdfeaff, 0x7a8aa8, 0.3);
 scene.add(hemi);
@@ -63,7 +70,7 @@ const LIFTS = [
 const terrain = new Terrain(scene, { sunDir: SUN_DIR, shadowRes: LOW_GFX ? 1.5 : 1.0, treeSpacing: LOW_GFX ? 12 : 9.5, liftLines: LIFTS.map(l => [l.bottom, l.top]) });
 buildRange(scene, terrain);
 // detailed pine models for the trees near the camera
-const treeLod = new TreeLOD(scene, terrain, { radius: LOW_GFX ? 75 : 115 });
+const treeLod = new TreeLOD(scene, terrain, { radius: LOW_GFX ? 60 : 115, max: LOW_GFX ? 300 : 900 });
 buildLodge(scene, terrain, LODGE.x, LODGE.z);
 for (const dx of [-9.5, 0, 9.5]) terrain.addObstacle(-40 + dx, BASE_Z - 68, 6.5, 12, 'lodge');
 const lifts = LIFTS.map(l => new Chairlift(scene, terrain, l.bottom, l.top, { name: l.name, speed: l.speed }));
@@ -297,8 +304,32 @@ function updateHeliMode(dt, inp) {
   }
 }
 
+// ---------- right stick: swing the camera round you; let go and it eases back behind you ----------
+const stickLook = { yaw: 0, pitch: 0 };
+function applyStickLook(dt, inp, skip) {
+  const lx = inp.lookX || 0, ly = inp.lookY || 0;
+  if (!skip && (Math.abs(lx) > 0.05 || Math.abs(ly) > 0.05)) {
+    stickLook.yaw = Math.max(-Math.PI, Math.min(Math.PI, stickLook.yaw - lx * 2.6 * dt));
+    stickLook.pitch = Math.max(-0.25, Math.min(0.95, stickLook.pitch - ly * 1.6 * dt));
+  } else {
+    const k = 1 - Math.exp(-5 * dt);
+    stickLook.yaw -= stickLook.yaw * k; stickLook.pitch -= stickLook.pitch * k;
+  }
+  if (Math.abs(stickLook.yaw) < 1e-3 && Math.abs(stickLook.pitch) < 1e-3) return;
+  const t = rider.pos.clone(); t.y += 1;
+  const off = camera.position.clone().sub(t);
+  off.applyAxisAngle(new THREE.Vector3(0, 1, 0), stickLook.yaw);
+  const hd = Math.hypot(off.x, off.z), d = off.length(), el = Math.atan2(off.y, hd) + stickLook.pitch;
+  const e = Math.max(-0.2, Math.min(1.3, el));
+  off.set(off.x / (hd || 1) * Math.cos(e) * d, Math.sin(e) * d, off.z / (hd || 1) * Math.cos(e) * d);
+  camera.position.copy(t).add(off);
+  camera.position.y = Math.max(camera.position.y, terrain.heightAt(camera.position.x, camera.position.z) + 0.8);
+  camera.lookAt(t);
+}
+
 // ---------- look around (Shift + arrows when stopped or under the parachute) ----------
 const freeLook = { on: false, blend: 0, yaw: 0, pitch: 0.3 };
+let helpRideT = 0;
 function updateFreeLook(dt, inp, looking) {
   if (looking && !freeLook.on) {
     // start from where the camera is now
@@ -1030,7 +1061,8 @@ window.__fps = 0;
 function frame(now) {
   const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
   last = Math.max(last, now);
-  tick(dt, now);
+  // keep the loop alive even if one frame hits a bug (log it once instead of freezing the game)
+  try { tick(dt, now); } catch (e) { if (!frame.errs) frame.errs = 0; if (frame.errs++ < 3) console.error(e); }
   requestAnimationFrame(frame);
 }
 
@@ -1062,6 +1094,13 @@ function tick(dt, now) {
     inp.confirmPressed = inp.restartPressed = inp.menuPressed = inp.leftPressed = inp.rightPressed = inp.upPressed = inp.downPressed = false;
     inp.taps.clear(); inp.padTaps.clear();
   } else if ((game.mode === 'menu' || game.mode === 'lift' || game.mode === 'liftwait') && !replayer.active && (inp.taps.has('KeyT') || inp.padTaps.has(BTN.Y))) toggleAch(true);
+  // right stick (or mouse wheel) scrolls whatever screen is open
+  const scrollY = (inp.lookY || 0) * 900 * dt;
+  if (Math.abs(scrollY) > 0.5) {
+    if (achOpen) achPanel.scrollTop += scrollY;
+    else if (game.mode === 'menu') menuEl.scrollTop += scrollY;
+    else if (game.mode === 'lodge') lodgeEl.scrollTop += scrollY;
+  }
   if (game.mode === 'menu') {
     if (inp.leftPressed && game.sport === 'board') setStance(true);
     if (inp.rightPressed && game.sport === 'board') setStance(false);
@@ -1106,7 +1145,10 @@ function tick(dt, now) {
     rider.updateVisual(dt, inp);
     if (!game.paused) recorder.record(dt, rider);
     chase.update(dt, rider);
+    applyStickLook(dt, inp, looking);
     applyFreeLook(dt);
+    // on a controller the controls panel tucks itself away after a few seconds of riding
+    if (input.padName || IS_XBOX) { helpRideT += dt; if (helpRideT > 8 && hud.showHelp && !hud.helpTouched) hud.setHelp(false); }
     rider.pos.copy(realPos);
     if (runCamBlend) {
       // ease the camera from the chair view to behind you
@@ -1231,6 +1273,18 @@ function tick(dt, now) {
   renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);
+
+// Get the graphics card ready for everything up front (the race ghost, the helicopter, the replay rider,
+// the trees and lift once their models arrive), so nothing stalls the first time it shows up.
+race.prepareGhost();
+function warmUp() {
+  const hidden = [];
+  for (const o of [race.ghostRider && race.ghostRider.root, heli.group, ghost.root]) if (o && !o.visible) { o.visible = true; hidden.push(o); }
+  try { renderer.compile(scene, camera); } catch (e) { console.warn(e); }
+  for (const o of hidden) o.visible = false;
+}
+setTimeout(warmUp, 300);
+setTimeout(warmUp, 6000);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;

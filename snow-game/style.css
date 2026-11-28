@@ -173,3 +173,9 @@ kbd { font-family: inherit; font-size: 10px; border: 1px solid rgba(255,255,255,
 @media (max-width: 600px) { #lodge-panel { inset: 2%; padding: 12px; } #comp-hud, #lodge-hint { white-space: normal; width: 92%; } }
 
 .credits { font-size: 11px; opacity: 0.55; margin-top: 10px; }
+
+/* the home screen scrolls (right stick on a controller) when the TV can't fit it all */
+#menu { overflow-y: auto; justify-content: safe center; }
+#lodge-panel, #ach-panel { scroll-behavior: auto; }
+
+.gfx-reset { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0d1b33; color: #fff; font-size: 28px; z-index: 99; }

@@ -3,11 +3,11 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { fbm, ridged, smoothstep, rng } from './noise.js';
 import { WORLD, BASE_Z } from './terrain.js';
-import { tex, SKY_PHOTO } from './art.js';
+import { tex, SKY_PHOTO, SKY_PHOTO_SMALL } from './art.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
 // Physical sky + matching image-based lighting. Returns the sun direction.
-export function setupSky(scene, renderer, { elevation = 28, azimuth = 215 } = {}) {
+export function setupSky(scene, renderer, { elevation = 28, azimuth = 215, low = false } = {}) {
   const sky = new Sky();
   sky.scale.setScalar(20000);
   const u = sky.material.uniforms;
@@ -26,15 +26,15 @@ export function setupSky(scene, renderer, { elevation = 28, azimuth = 215 } = {}
   scene.environmentIntensity = 0.65;
   pmrem.dispose();
   // then swap in the real sky photo (and light the scene with it) once it has downloaded
-  loadSkyPhoto(scene, renderer, sky, sun);
+  loadSkyPhoto(scene, renderer, sky, sun, low ? SKY_PHOTO_SMALL : SKY_PHOTO);
   return { sky, sun };
 }
 
 // The sky photo is turned so its sun sits where our sunlight comes from (photo's sun: 34° round, 48° up).
 const PHOTO_SUN_ANGLE = 0.595;
 export let SKY_ROT_SIGN = 1;
-function loadSkyPhoto(scene, renderer, sky, sun) {
-  new RGBELoader().load(SKY_PHOTO, (hdr) => {
+function loadSkyPhoto(scene, renderer, sky, sun, file) {
+  new RGBELoader().load(file, (hdr) => {
     hdr.mapping = THREE.EquirectangularReflectionMapping;
     const rot = SKY_ROT_SIGN * (PHOTO_SUN_ANGLE - Math.atan2(sun.z, sun.x));
     const pm = new THREE.PMREMGenerator(renderer);
